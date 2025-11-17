@@ -19,7 +19,7 @@ class App:
     def route(
         self,
         path: str,
-        methods: list[str] | None = None,
+        methods: list[str] | None = ["GET"],
     ) -> Callable[[Callable[..., Any]], Route]:
         """Decorator to register a function as an orchestrated route.
 

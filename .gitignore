@@ -1,1 +1,63 @@
-/target
+# ------------------------
+# Python
+# ------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.env
+*.venv/
+venv/
+env/
+ENV/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+*.wheel
+
+# mypy / type check
+.mypy_cache/
+.dmypy.json
+.pyre/
+
+# pytest
+.pytest_cache/
+
+# ------------------------
+# Rust / Cargo
+# ------------------------
+/target/
+**/*.rs.bk
+**/*.rlib
+**/*.dSYM
+Cargo.lock  # include in libraries if desired; omit for apps
+
+# ------------------------
+# Editor / IDE
+# ------------------------
+# VSCode
+.vscode/
+*.code-workspace
+
+# JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# MacOS
+.DS_Store
+
+# Logs
+*.log
+
+# Temporary files
+*.swp
+*~
+
