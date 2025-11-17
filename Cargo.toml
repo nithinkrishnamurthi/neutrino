@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "src/crates/neutrino-core",
+]
+resolver = "2"
