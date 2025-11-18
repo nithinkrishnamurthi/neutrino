@@ -1,5 +1,5 @@
 [workspace]
 members = [
-    "src/crates/neutrino-core",
+    "crates/neutrino-core",
 ]
 resolver = "2"

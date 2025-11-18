@@ -26,10 +26,6 @@ pub enum Message {
 
     /// Heartbeat for health checking
     Heartbeat { worker_id: String },
-
-    RouteRegistry { routes: Vec<String, Vec<String>> },
-    
-    DiscoverRoutes,
 }
 
 impl Message {
