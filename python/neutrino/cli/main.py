@@ -34,7 +34,13 @@ def cli() -> None:
     default="yaml",
     help="Output format (default: yaml)",
 )
-def deploy(app_module: str, output: str | None, output_format: str) -> None:
+@click.option(
+    "--openapi",
+    is_flag=True,
+    default=False,
+    help="Also generate openapi.json file for Rust router",
+)
+def deploy(app_module: str, output: str | None, output_format: str, openapi: bool) -> None:
     """
     Generate deployment manifest for a Neutrino application.
 
@@ -48,8 +54,10 @@ def deploy(app_module: str, output: str | None, output_format: str) -> None:
         neutrino deploy myapp.main -o neutrino-routes.yaml
 
         neutrino deploy myapp.main --format json
+
+        neutrino deploy myapp.main --openapi
     """
-    
+
 
     # Handle module:variable syntax
 
@@ -78,6 +86,13 @@ def deploy(app_module: str, output: str | None, output_format: str) -> None:
             click.echo(f"Manifest written to {output}", err=True)
         else:
             click.echo(content)
+
+        # Generate OpenAPI spec if requested
+        if openapi:
+            openapi_spec = app.generate_openapi()
+            openapi_path = Path("openapi.json")
+            openapi_path.write_text(json.dumps(openapi_spec, indent=2))
+            click.echo(f"OpenAPI spec written to {openapi_path}", err=True)
 
         # Summary
         route_count = len(manifest["routes"])

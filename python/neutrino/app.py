@@ -20,18 +20,37 @@ class App:
         self,
         path: str,
         methods: list[str] | None = ["GET"],
+        request_model: Type[Any] | None = None,
+        response_model: Type[Any] | None = None,
+        summary: str | None = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
     ) -> Callable[[Callable[..., Any]], Route]:
         """Decorator to register a function as an orchestrated route.
 
         Args:
             path: The route path (e.g., "/analyze", "/process").
             methods: HTTP methods for the route. Defaults to ["GET"].
+            request_model: Optional Pydantic model for request validation.
+            response_model: Optional Pydantic model for response serialization.
+            summary: Optional short summary for OpenAPI documentation.
+            description: Optional detailed description for OpenAPI documentation.
+            tags: Optional list of tags for grouping routes in OpenAPI docs.
 
         Returns:
             Decorator function that registers the route.
         """
         def decorator(func: Callable[..., Any]) -> Route:
-            route_obj = Route(func, path, methods)
+            route_obj = Route(
+                func,
+                path,
+                methods,
+                request_model,
+                response_model,
+                summary,
+                description,
+                tags,
+            )
             self._route_registry[path] = route_obj
             return route_obj
         return decorator
@@ -108,3 +127,16 @@ class App:
             List of model names.
         """
         return list(self._model_registry.keys())
+
+    def generate_openapi(self, title: str = "Neutrino API", version: str = "1.0.0") -> dict[str, Any]:
+        """Generate OpenAPI 3.0 specification from registered routes.
+
+        Args:
+            title: API title for the OpenAPI spec.
+            version: API version for the OpenAPI spec.
+
+        Returns:
+            OpenAPI 3.0 specification dictionary.
+        """
+        from neutrino.openapi_generator import generate_openapi_spec
+        return generate_openapi_spec(self, title, version)
