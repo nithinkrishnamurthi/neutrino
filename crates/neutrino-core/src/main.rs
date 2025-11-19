@@ -1,5 +1,6 @@
-use neutrino_core::worker::WorkerHandle;
-use tracing::{info, Level};
+use neutrino_core::{Config, Orchestrator};
+use std::sync::Arc;
+use tracing::{error, info, Level};
 use tracing_subscriber;
 
 #[tokio::main]
@@ -11,24 +12,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting Neutrino orchestrator");
 
-    // Generate worker ID
-    let worker_id = format!("worker-{}", uuid::Uuid::new_v4().to_string()[..8].to_string());
+    // Load configuration
+    let config = match Config::from_file("config.yaml") {
+        Ok(cfg) => {
+            info!("Loaded configuration from config.yaml");
+            cfg
+        }
+        Err(e) => {
+            info!("Could not load config.yaml: {}, using defaults", e);
+            Config::default()
+        }
+    };
 
-    // Spawn worker
-    info!("Spawning worker {}", worker_id);
-    let mut worker_handle = WorkerHandle::spawn(worker_id.clone()).await?;
+    // Create orchestrator
+    let orchestrator = Arc::new(Orchestrator::new(config.clone()));
 
-    // Wait for worker to be ready
-    worker_handle.wait_ready().await?;
+    // Start worker pool
+    orchestrator.start().await?;
 
-    info!("Orchestrator ready with 1 worker");
+    // Clone config values before moving into async block
+    let http_host = config.orchestrator.http.host.clone();
+    let http_port = config.orchestrator.http.port;
 
-    // Keep alive for a bit then shutdown
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    // Start HTTP server
+    let server_orchestrator = Arc::clone(&orchestrator);
+    let server_host = http_host.clone();
+    let server_handle = tokio::spawn(async move {
+        if let Err(e) = neutrino_core::http::start_server(
+            server_orchestrator,
+            server_host,
+            http_port,
+        )
+        .await
+        {
+            error!("HTTP server error: {}", e);
+        }
+    });
 
-    // Gracefully shutdown worker
-    info!("Shutting down worker");
-    worker_handle.shutdown().await?;
+    info!(
+        "Neutrino orchestrator running on {}:{}",
+        http_host, http_port
+    );
+
+    // Wait for shutdown signal (Ctrl+C)
+    tokio::signal::ctrl_c().await?;
+
+    info!("Received shutdown signal");
+
+    // Gracefully shutdown
+    orchestrator.shutdown().await?;
+
+    // Wait for server to finish
+    server_handle.abort();
 
     info!("Orchestrator shutdown complete");
     Ok(())

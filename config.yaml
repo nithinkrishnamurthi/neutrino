@@ -1,0 +1,25 @@
+# Neutrino Orchestrator Configuration
+orchestrator:
+  # Number of Python worker processes to spawn
+  worker_count: 4
+
+  # HTTP server settings
+  http:
+    host: "0.0.0.0"
+    port: 8080
+
+  # Worker lifecycle settings
+  worker:
+    # Maximum tasks before worker recycling
+    max_tasks_per_worker: 1000
+
+    # Maximum memory (MB) before worker recycling
+    max_memory_mb: 4096
+
+    # Worker startup timeout (seconds)
+    startup_timeout_secs: 10
+
+  # Task settings
+  tasks:
+    # Default timeout for synchronous tasks (seconds)
+    default_timeout_secs: 30
