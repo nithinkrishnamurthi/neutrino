@@ -176,6 +176,17 @@ def generate_openapi_spec(app: App, title: str = "Neutrino API", version: str = 
         }
     }
 
+    # Add ASGI app metadata if mounted
+    asgi_info = app.get_asgi_app()
+    if asgi_info:
+        path_prefix, asgi_app = asgi_info
+        # Use OpenAPI extension field for Neutrino-specific metadata
+        spec["x-neutrino-asgi"] = {
+            "enabled": True,
+            "path_prefix": path_prefix,
+            "app_class": f"{asgi_app.__class__.__module__}.{asgi_app.__class__.__name__}",
+        }
+
     # Collect all schemas from routes
     schemas: dict[str, Any] = {}
 

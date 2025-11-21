@@ -1,0 +1,67 @@
+# Example Neutrino Configuration
+orchestrator:
+  # Number of Python worker processes to spawn
+  worker_count: 4
+
+  # Python module containing your Neutrino app
+  # Format: "module.path" (same as Python import path)
+  # Examples: "examples.test_routes", "myapp.main", "app"
+  app_module: "examples.test_routes"
+
+  # HTTP server settings
+  http:
+    host: "0.0.0.0"
+    port: 8080
+
+    # Path to OpenAPI spec for dynamic route registration
+    # The Rust orchestrator will load this file and create routes automatically
+    # Generate this file with: neutrino deploy myapp --openapi
+    openapi_spec: "openapi.json"
+
+  # Worker lifecycle settings
+  worker:
+    # Maximum tasks before worker recycling
+    max_tasks_per_worker: 1000
+
+    # Maximum memory (MB) before worker recycling
+    max_memory_mb: 4096
+
+    # Worker startup timeout (seconds)
+    startup_timeout_secs: 10
+
+  # Task settings
+  tasks:
+    # Default timeout for synchronous tasks (seconds)
+    default_timeout_secs: 30
+
+  # Optional ASGI app integration (e.g., FastAPI, Django)
+  # Uncomment and configure to enable ASGI app mounting
+  #
+  # asgi:
+  #   enabled: true
+  #   mode: "mounted"  # "mounted" or "proxy"
+  #   path_prefix: "/api"
+  #
+  #   # For mounted mode (development/single-pod):
+  #   port: 8081
+  #   workers: 4
+  #
+  #   # For proxy mode (Kubernetes/multi-service):
+  #   # service_url: "http://fastapi-service:8080"
+  #   # timeout_secs: 30
+  #
+  # Example mounted mode config:
+  #   asgi:
+  #     enabled: true
+  #     mode: "mounted"
+  #     path_prefix: "/api"
+  #     port: 8081
+  #     workers: 4
+  #
+  # Example proxy mode config (Kubernetes):
+  #   asgi:
+  #     enabled: true
+  #     mode: "proxy"
+  #     path_prefix: "/api"
+  #     service_url: "http://fastapi-service:8080"
+  #     timeout_secs: 30

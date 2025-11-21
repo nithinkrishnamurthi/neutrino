@@ -35,7 +35,7 @@ impl Orchestrator {
             let worker_id = format!("worker-{}", i);
             info!("Spawning {}", worker_id);
 
-            match WorkerHandle::spawn(worker_id.clone()).await {
+            match WorkerHandle::spawn(worker_id.clone(), &self.config.orchestrator.app_module).await {
                 Ok(mut handle) => {
                     // Wait for worker to be ready
                     if let Err(e) = handle.wait_ready().await {

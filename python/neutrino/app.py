@@ -15,6 +15,8 @@ class App:
     def __init__(self):
         self._route_registry: dict[str, Route] = {}
         self._model_registry: dict[str, Model] = {}
+        self._asgi_app: Any | None = None
+        self._asgi_path_prefix: str | None = None
 
     def route(
         self,
@@ -127,6 +129,39 @@ class App:
             List of model names.
         """
         return list(self._model_registry.keys())
+
+    def mount_asgi(self, path_prefix: str, asgi_app: Any) -> None:
+        """Mount an ASGI application (e.g., FastAPI, Django) at a path prefix.
+
+        The ASGI app will be served alongside Neutrino routes. In mounted mode,
+        the app runs in the same process via Uvicorn. In proxy mode, requests
+        are forwarded to a separate service.
+
+        Args:
+            path_prefix: URL path prefix for the ASGI app (e.g., "/api").
+            asgi_app: ASGI application instance (e.g., FastAPI() app).
+
+        Example:
+            >>> from fastapi import FastAPI
+            >>> fastapi_app = FastAPI()
+            >>> neutrino_app = App()
+            >>> neutrino_app.mount_asgi("/api", fastapi_app)
+        """
+        if not path_prefix.startswith("/"):
+            raise ValueError("path_prefix must start with '/'")
+
+        self._asgi_app = asgi_app
+        self._asgi_path_prefix = path_prefix
+
+    def get_asgi_app(self) -> tuple[str, Any] | None:
+        """Get the mounted ASGI app and its path prefix.
+
+        Returns:
+            Tuple of (path_prefix, asgi_app) if mounted, None otherwise.
+        """
+        if self._asgi_app is not None and self._asgi_path_prefix is not None:
+            return (self._asgi_path_prefix, self._asgi_app)
+        return None
 
     def generate_openapi(self, title: str = "Neutrino API", version: str = "1.0.0") -> dict[str, Any]:
         """Generate OpenAPI 3.0 specification from registered routes.

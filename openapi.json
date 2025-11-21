@@ -1,0 +1,100 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Neutrino API",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/users": {
+      "get": {
+        "operationId": "get_list_users",
+        "summary": "List Users",
+        "tags": [],
+        "description": "List all users.",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/users/{user_id}": {
+      "get": {
+        "operationId": "get_get_user",
+        "summary": "Get User",
+        "tags": [],
+        "description": "Get a specific user by ID.",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/products": {
+      "get": {
+        "operationId": "get_manage_products",
+        "summary": "Manage Products",
+        "tags": [],
+        "description": "List or create products.",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_manage_products",
+        "summary": "Manage Products",
+        "tags": [],
+        "description": "List or create products.",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "get_health",
+        "summary": "Health",
+        "tags": [],
+        "description": "Health check endpoint.",
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {}
+  }
+}
