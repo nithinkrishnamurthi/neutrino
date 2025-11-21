@@ -63,3 +63,5 @@ Cargo.lock  # include in libraries if desired; omit for apps
 *.swp
 *~
 
+uvicorn_app.py
+openapi.json

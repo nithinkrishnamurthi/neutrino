@@ -6,7 +6,7 @@ from typing import Any
 import yaml
 
 from neutrino import App
-from neutrino.cli.discovery import get_class_path, get_handler_path
+from cli.discovery import get_class_path, get_handler_path
 
 
 def generate_manifest(app: App, module_path: str) -> dict[str, Any]:

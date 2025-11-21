@@ -11,14 +11,14 @@ pub enum Message {
     TaskAssignment {
         task_id: String,
         function_name: String,
-        args: Vec<u8>, // msgpack-encoded arguments
+        args: rmpv::Value, // Native msgpack value (encoded once with entire message)
     },
 
     /// Worker reports task completion
     TaskResult {
         task_id: String,
         success: bool,
-        result: Vec<u8>, // msgpack-encoded result or error
+        result: rmpv::Value, // Native msgpack value (encoded once with entire message)
     },
 
     /// Orchestrator requests worker shutdown

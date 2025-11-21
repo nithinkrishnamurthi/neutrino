@@ -48,15 +48,21 @@ class ProtocolHandler:
         self.send({"WorkerReady": {"worker_id": worker_id, "pid": pid}})
 
     def send_task_result(
-        self, task_id: str, success: bool, result: bytes
+        self, task_id: str, success: bool, result: Any
     ) -> None:
-        """Send TaskResult message."""
+        """Send TaskResult message.
+
+        Args:
+            task_id: Unique task identifier
+            success: Whether task succeeded
+            result: Native Python value (dict, list, str, int, etc.) - will be encoded as msgpack
+        """
         self.send(
             {
                 "TaskResult": {
                     "task_id": task_id,
                     "success": success,
-                    "result": list(result),  # Convert bytes to list for msgpack
+                    "result": result,  # Native value, encoded once with entire message
                 }
             }
         )

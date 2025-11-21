@@ -5,7 +5,7 @@ orchestrator:
 
   # Python module containing your Neutrino app
   # e.g., "examples.test_routes" or "myapp.main"
-  app_module: "examples.test_routes"
+  app_module: "examples.fastapi_integration"
 
   # HTTP server settings
   http:
@@ -32,15 +32,14 @@ orchestrator:
     default_timeout_secs: 30
 
   # Optional ASGI app integration (e.g., FastAPI, Django)
-  # asgi:
-  #   enabled: true
-  #   mode: "mounted"  # "mounted" (same process) or "proxy" (separate service)
-  #   path_prefix: "/api"  # URL prefix for ASGI routes
-  #
-  #   # Mounted mode options (runs Uvicorn locally):
-  #   port: 8081  # Internal port for Uvicorn
-  #   workers: 4  # Number of Uvicorn workers
-  #
-  #   # Proxy mode options (forwards to external service):
-  #   # service_url: "http://fastapi-service:8080"
-  #   # timeout_secs: 30
+  asgi:
+    enabled: true
+    mode: "mounted"  # "mounted" (same process) or "proxy" (separate service)
+
+    # Mounted mode options (runs Uvicorn locally):
+    port: 8081  # Internal port for Uvicorn
+    workers: 4  # Number of Uvicorn workers
+
+    # Proxy mode options (forwards to external service):
+    # service_url: "http://fastapi-service:8080"
+    # timeout_secs: 30

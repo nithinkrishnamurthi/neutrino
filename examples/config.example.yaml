@@ -36,11 +36,11 @@ orchestrator:
 
   # Optional ASGI app integration (e.g., FastAPI, Django)
   # Uncomment and configure to enable ASGI app mounting
+  # Routes not registered in Neutrino will automatically fall through to the ASGI app
   #
   # asgi:
   #   enabled: true
   #   mode: "mounted"  # "mounted" or "proxy"
-  #   path_prefix: "/api"
   #
   #   # For mounted mode (development/single-pod):
   #   port: 8081
@@ -54,7 +54,6 @@ orchestrator:
   #   asgi:
   #     enabled: true
   #     mode: "mounted"
-  #     path_prefix: "/api"
   #     port: 8081
   #     workers: 4
   #
@@ -62,6 +61,5 @@ orchestrator:
   #   asgi:
   #     enabled: true
   #     mode: "proxy"
-  #     path_prefix: "/api"
   #     service_url: "http://fastapi-service:8080"
   #     timeout_secs: 30

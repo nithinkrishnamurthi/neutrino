@@ -4,10 +4,11 @@ use axum::{
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{any, get, post, delete, patch, put},
+    routing::{get, post, delete, patch, put},
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -23,6 +24,8 @@ pub struct AppState {
     pub orchestrator: Arc<Orchestrator>,
     pub asgi_config: Option<AsgiConfig>,
     pub asgi_client: Option<reqwest::Client>,
+    /// Set of registered Neutrino route paths for lookup-based routing
+    pub neutrino_routes: Arc<HashSet<String>>,
 }
 
 /// Request body for task execution
@@ -39,6 +42,84 @@ pub struct TaskResponse {
     pub error: Option<String>,
     pub worker_id: Option<String>,
     pub execution_time_ms: Option<u64>,
+}
+
+/// Convert serde_json::Value to rmpv::Value
+fn json_to_msgpack_value(json: &serde_json::Value) -> Result<rmpv::Value, String> {
+    match json {
+        serde_json::Value::Null => Ok(rmpv::Value::Nil),
+        serde_json::Value::Bool(b) => Ok(rmpv::Value::Boolean(*b)),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(rmpv::Value::Integer(i.into()))
+            } else if let Some(f) = n.as_f64() {
+                Ok(rmpv::Value::F64(f))
+            } else {
+                Err("Invalid number".to_string())
+            }
+        }
+        serde_json::Value::String(s) => Ok(rmpv::Value::String(s.clone().into())),
+        serde_json::Value::Array(arr) => {
+            let values: Result<Vec<_>, _> = arr.iter().map(json_to_msgpack_value).collect();
+            Ok(rmpv::Value::Array(values?))
+        }
+        serde_json::Value::Object(obj) => {
+            let pairs: Result<Vec<(rmpv::Value, rmpv::Value)>, String> = obj
+                .iter()
+                .map(|(k, v)| {
+                    Ok((
+                        rmpv::Value::String(k.clone().into()),
+                        json_to_msgpack_value(v)?,
+                    ))
+                })
+                .collect();
+            Ok(rmpv::Value::Map(pairs?))
+        }
+    }
+}
+
+/// Convert rmpv::Value to serde_json::Value
+fn msgpack_value_to_json(msgpack: &rmpv::Value) -> Result<serde_json::Value, String> {
+    match msgpack {
+        rmpv::Value::Nil => Ok(serde_json::Value::Null),
+        rmpv::Value::Boolean(b) => Ok(serde_json::Value::Bool(*b)),
+        rmpv::Value::Integer(i) => {
+            if let Some(val) = i.as_i64() {
+                Ok(serde_json::json!(val))
+            } else if let Some(val) = i.as_u64() {
+                Ok(serde_json::json!(val))
+            } else {
+                Err("Integer out of range".to_string())
+            }
+        }
+        rmpv::Value::F32(f) => Ok(serde_json::json!(*f)),
+        rmpv::Value::F64(f) => Ok(serde_json::json!(*f)),
+        rmpv::Value::String(s) => Ok(serde_json::Value::String(
+            s.as_str().ok_or("Invalid UTF-8")?.to_string(),
+        )),
+        rmpv::Value::Binary(b) => {
+            // Convert binary to array of numbers for JSON compatibility
+            Ok(serde_json::Value::Array(
+                b.iter().map(|&byte| serde_json::json!(byte)).collect(),
+            ))
+        }
+        rmpv::Value::Array(arr) => {
+            let values: Result<Vec<_>, _> = arr.iter().map(msgpack_value_to_json).collect();
+            Ok(serde_json::Value::Array(values?))
+        }
+        rmpv::Value::Map(map) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in map {
+                let key = match k {
+                    rmpv::Value::String(s) => s.as_str().ok_or("Invalid UTF-8")?.to_string(),
+                    _ => return Err("Map keys must be strings".to_string()),
+                };
+                obj.insert(key, msgpack_value_to_json(v)?);
+            }
+            Ok(serde_json::Value::Object(obj))
+        }
+        rmpv::Value::Ext(_, _) => Err("Extension types not supported".to_string()),
+    }
 }
 
 /// Health check endpoint
@@ -86,17 +167,15 @@ async fn execute_task_no_body(
         handler_name, worker.worker.id, worker_idx
     );
 
-    // For GET/DELETE, send empty JSON object as args
-    let args = serde_json::Value::Object(serde_json::Map::new());
-    let args_bytes = rmp_serde::to_vec(&args)
-        .map_err(|e| AppError::SerializationError(e.to_string()))?;
+    // For GET/DELETE, send empty map as args
+    let args = rmpv::Value::Map(vec![]);
 
     // Create task assignment message
     let task_id = uuid::Uuid::new_v4().to_string();
     let msg = Message::TaskAssignment {
         task_id: task_id.clone(),
         function_name: handler_name.clone(),
-        args: args_bytes,
+        args,
     };
 
     // Send task to worker
@@ -123,12 +202,12 @@ async fn execute_task_no_body(
     match result_msg {
         Message::TaskResult {
             success,
-            result: result_bytes,
+            result: result_value,
             ..
         } => {
             if success {
-                let result: serde_json::Value = rmp_serde::from_slice(&result_bytes)
-                    .map_err(|e| AppError::DeserializationError(e.to_string()))?;
+                let result = msgpack_value_to_json(&result_value)
+                    .map_err(|e| AppError::DeserializationError(e))?;
 
                 Ok(Json(TaskResponse {
                     success: true,
@@ -138,8 +217,8 @@ async fn execute_task_no_body(
                     execution_time_ms: Some(execution_time),
                 }))
             } else {
-                let error: serde_json::Value = rmp_serde::from_slice(&result_bytes)
-                    .map_err(|e| AppError::DeserializationError(e.to_string()))?;
+                let error = msgpack_value_to_json(&result_value)
+                    .map_err(|e| AppError::DeserializationError(e))?;
 
                 Ok(Json(TaskResponse {
                     success: false,
@@ -180,8 +259,8 @@ async fn execute_task_with_body(
         handler_name, worker.worker.id, worker_idx
     );
 
-    // Serialize arguments to msgpack
-    let args_bytes = rmp_serde::to_vec(&request.args)
+    // Convert JSON to msgpack Value
+    let args = json_to_msgpack_value(&request.args)
         .map_err(|e| AppError::SerializationError(e.to_string()))?;
 
     // Create task assignment message
@@ -189,7 +268,7 @@ async fn execute_task_with_body(
     let msg = Message::TaskAssignment {
         task_id: task_id.clone(),
         function_name: handler_name.clone(),
-        args: args_bytes,
+        args,
     };
 
     // Send task to worker
@@ -216,12 +295,12 @@ async fn execute_task_with_body(
     match result_msg {
         Message::TaskResult {
             success,
-            result: result_bytes,
+            result: result_value,
             ..
         } => {
             if success {
-                let result: serde_json::Value = rmp_serde::from_slice(&result_bytes)
-                    .map_err(|e| AppError::DeserializationError(e.to_string()))?;
+                let result = msgpack_value_to_json(&result_value)
+                    .map_err(|e| AppError::DeserializationError(e))?;
 
                 Ok(Json(TaskResponse {
                     success: true,
@@ -231,8 +310,8 @@ async fn execute_task_with_body(
                     execution_time_ms: Some(execution_time),
                 }))
             } else {
-                let error: serde_json::Value = rmp_serde::from_slice(&result_bytes)
-                    .map_err(|e| AppError::DeserializationError(e.to_string()))?;
+                let error = msgpack_value_to_json(&result_value)
+                    .map_err(|e| AppError::DeserializationError(e))?;
 
                 Ok(Json(TaskResponse {
                     success: false,
@@ -247,11 +326,21 @@ async fn execute_task_with_body(
     }
 }
 
-/// Proxy handler for ASGI routes
-async fn proxy_to_asgi(
+/// Fallback handler that checks route lookup and proxies to ASGI if not found
+async fn asgi_fallback_handler(
     State(state): State<AppState>,
     req: Request,
 ) -> Result<Response, AppError> {
+    let path = req.uri().path();
+
+    // Check if this route is registered in Neutrino
+    if state.neutrino_routes.contains(path) {
+        // This should never happen as registered routes are handled first
+        // But if it does, return 500 to indicate routing misconfiguration
+        return Err(AppError::RouteNotFound(path.to_string()));
+    }
+
+    // Route not in Neutrino - proxy to ASGI app
     let asgi_config = state
         .asgi_config
         .as_ref()
@@ -277,14 +366,13 @@ async fn proxy_to_asgi(
         }
     };
 
-    // Get the original URI and strip the ASGI prefix
-    let original_path = req.uri().path();
+    // Get the original URI
     let query = req.uri().query().map(|q| format!("?{}", q)).unwrap_or_default();
 
     // Build target URL
-    let target_url = format!("{}{}{}", target_base, original_path, query);
+    let target_url = format!("{}{}{}", target_base, path, query);
 
-    info!("Proxying ASGI request: {} -> {}", original_path, target_url);
+    info!("Proxying to ASGI: {} -> {}", path, target_url);
 
     // Convert axum request to reqwest request
     let method = req.method().clone();
@@ -412,11 +500,10 @@ pub fn create_router_with_openapi(
         None
     };
 
-    let state = AppState {
-        orchestrator,
-        asgi_config: asgi_config.clone(),
-        asgi_client,
-    };
+    // Build set of registered Neutrino routes for lookup
+    let mut neutrino_routes = HashSet::new();
+    neutrino_routes.insert("/health".to_string());
+    neutrino_routes.insert("/status".to_string());
 
     let mut router = Router::new()
         .route("/health", get(health_check))
@@ -432,6 +519,9 @@ pub fn create_router_with_openapi(
                 "Registering route: {} {} -> {}",
                 route_info.method, route_info.path, route_info.handler_name
             );
+
+            // Add to Neutrino routes set
+            neutrino_routes.insert(route_info.path.clone());
 
             // Create a middleware that injects the handler name as an extension
             let handler_name = route_info.handler_name.clone();
@@ -465,18 +555,20 @@ pub fn create_router_with_openapi(
         // Note: For production use, always provide an OpenAPI spec
     }
 
-    // Add ASGI proxy route if configured
+    let state = AppState {
+        orchestrator,
+        asgi_config: asgi_config.clone(),
+        asgi_client,
+        neutrino_routes: Arc::new(neutrino_routes),
+    };
+
+    // Add ASGI fallback handler if configured
     if let Some(ref config) = asgi_config {
         if config.enabled {
-            let path_prefix = config.path_prefix.clone();
-            info!("Mounting ASGI proxy at path prefix: {}", path_prefix);
+            info!("ASGI integration enabled - unmatched routes will fallback to ASGI app");
 
-            // Create catch-all route for ASGI prefix
-            let asgi_route = format!("{}/*path", path_prefix.trim_end_matches('/'));
-            router = router.route(&asgi_route, any(proxy_to_asgi));
-
-            // Also handle exact prefix path (without trailing slash)
-            router = router.route(&path_prefix, any(proxy_to_asgi));
+            // Add catch-all fallback route (lowest priority)
+            router = router.fallback(asgi_fallback_handler);
         }
     }
 

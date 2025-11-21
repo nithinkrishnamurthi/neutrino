@@ -45,8 +45,6 @@ pub struct AsgiConfig {
     pub enabled: bool,
     /// Deployment mode: "mounted" (same process) or "proxy" (separate service)
     pub mode: AsgiMode,
-    /// URL path prefix for ASGI routes (e.g., "/api")
-    pub path_prefix: String,
     /// Port for internal Uvicorn server (mounted mode only)
     #[serde(default = "default_asgi_port")]
     pub port: u16,

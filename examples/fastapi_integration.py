@@ -47,7 +47,7 @@ users_db = {
     2: User(id=2, name="Bob", email="bob@example.com"),
 }
 
-@fastapi_app.get("/api/health")
+@fastapi_app.get("/health")
 def health_check():
     """Health check endpoint for ASGI app"""
     return {"status": "healthy", "service": "fastapi"}
@@ -57,14 +57,14 @@ def list_users():
     """List all users"""
     return {"users": list(users_db.values())}
 
-@fastapi_app.get("/api/users/{user_id}")
+@fastapi_app.get("/users/{user_id}")
 def get_user(user_id: int):
     """Get a specific user by ID"""
     if user_id not in users_db:
         raise HTTPException(status_code=404, detail="User not found")
     return users_db[user_id]
 
-@fastapi_app.post("/api/users")
+@fastapi_app.post("/users")
 def create_user(user: User):
     """Create a new user"""
     if user.id in users_db:
@@ -72,7 +72,7 @@ def create_user(user: User):
     users_db[user.id] = user
     return {"message": "User created", "user": user}
 
-@fastapi_app.put("/api/users/{user_id}")
+@fastapi_app.put("/users/{user_id}")
 def update_user(user_id: int, user: User):
     """Update an existing user"""
     if user_id not in users_db:
@@ -80,7 +80,7 @@ def update_user(user_id: int, user: User):
     users_db[user_id] = user
     return {"message": "User updated", "user": user}
 
-@fastapi_app.delete("/api/users/{user_id}")
+@fastapi_app.delete("/users/{user_id}")
 def delete_user(user_id: int):
     """Delete a user"""
     if user_id not in users_db:
@@ -154,8 +154,8 @@ async def analyze_data(request: AnalysisRequest) -> AnalysisResponse:
 # Mount FastAPI into Neutrino
 # ============================================================================
 
-# This tells Neutrino to serve FastAPI routes at the /api prefix
-app.mount_asgi("/api", fastapi_app)
+# This tells Neutrino to use FastAPI as a fallback for unmatched routes
+app.mount_asgi(fastapi_app)
 
 # ============================================================================
 # Configuration
@@ -171,7 +171,6 @@ orchestrator:
   asgi:
     enabled: true
     mode: "mounted"       # Use "mounted" for dev, "proxy" for production k8s
-    path_prefix: "/api"   # Must match the mount_asgi() prefix above
     port: 8081            # Internal Uvicorn port
     workers: 4            # Number of Uvicorn workers
 
@@ -185,11 +184,11 @@ Then:
    $ cargo run --release
 
 3. Test endpoints:
-   # FastAPI routes (CRUD):
+   # FastAPI routes (handled by ASGI fallback):
    $ curl http://localhost:8080/api/users
    $ curl http://localhost:8080/api/users/1
 
-   # Neutrino routes (compute):
+   # Neutrino routes (handled by orchestrator):
    $ curl -X POST http://localhost:8080/neutrino/process \\
        -H "Content-Type: application/json" \\
        -d '{"text": "hello", "iterations": 1000000}'
@@ -197,6 +196,11 @@ Then:
    $ curl -X POST http://localhost:8080/neutrino/analyze \\
        -H "Content-Type: application/json" \\
        -d '{"user_id": 1, "data": [1.5, 2.3, 3.7, 4.2, 5.8]}'
+
+How it works:
+- Routes registered in Neutrino (@app.route) go to the orchestrator
+- All other routes automatically fall through to the FastAPI app
+- No prefix required - routes intermix naturally!
 """
 
 # ============================================================================
@@ -278,7 +282,6 @@ orchestrator:
   asgi:
     enabled: true
     mode: "proxy"
-    path_prefix: "/api"
     service_url: "http://fastapi-service:8080"
     timeout_secs: 30
 
