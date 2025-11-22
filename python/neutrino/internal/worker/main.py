@@ -16,6 +16,8 @@ import socket
 import sys
 from typing import NoReturn
 import importlib
+import asyncio
+import inspect
 
 import msgpack
 
@@ -33,6 +35,23 @@ def main() -> NoReturn:
     pid = os.getpid()
 
     print(f"[Worker {worker_id}] Starting (pid={pid})")
+
+    # Import the app module at startup (pre-fork pattern - stays hot)
+    print(f"[Worker {worker_id}] Loading app module: {app_path}")
+    try:
+        module_parts = app_path.rsplit(":", 1)
+        module_name = module_parts[0]
+        app_var_name = module_parts[1] if len(module_parts) > 1 else "app"
+
+        # Import the module
+        module = importlib.import_module(module_name)
+        app = getattr(module, app_var_name)
+        print(f"[Worker {worker_id}] App loaded successfully with {len(app._route_registry)} routes")
+    except Exception as e:
+        print(f"[Worker {worker_id}] Failed to load app: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
     # Connect to Unix socket
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -68,7 +87,6 @@ def main() -> NoReturn:
                 print(f"[Worker {worker_id}] Shutting down (graceful={graceful})")
                 break
             elif "TaskAssignment" in message:
-                # TODO: Execute task
                 task_data = message["TaskAssignment"]
 
                 # Handle both dict format and tuple/list format from msgpack
@@ -83,14 +101,64 @@ def main() -> NoReturn:
                     args = task_data[2]  # Already decoded as native structure
                 else:
                     print(f"[Worker {worker_id}] Error: unexpected TaskAssignment format: {type(task_data)}")
+                    protocol.send_task_result(task_id, False, {"error": "Invalid task format"})
                     continue
 
                 print(f"[Worker {worker_id}] Task {task_id}: {func_name}({args})")
 
-                # For now, just acknowledge with a simple response
-                # Result is sent as native msgpack value (no double encoding)
-                result = {"status": "ok", "message": "Task received"}
-                protocol.send_task_result(task_id, True, result)
+                # Execute the task using pre-loaded app
+                try:
+                    # Find the route handler by function name
+                    route = None
+                    for path, route_obj in app._route_registry.items():
+                        if route_obj.handler.__name__ == func_name:
+                            route = route_obj
+                            break
+
+                    if route is None:
+                        raise ValueError(f"Route handler '{func_name}' not found")
+
+                    # Prepare arguments based on route's request_model
+                    if route.request_model is not None:
+                        # If there's a Pydantic model, instantiate it from args dict
+                        if args and isinstance(args, dict):
+                            request_obj = route.request_model(**args)
+                            result = route.handler(request_obj)
+                        else:
+                            # Empty args, create model with no data
+                            request_obj = route.request_model()
+                            result = route.handler(request_obj)
+                    else:
+                        # No request model - pass args as kwargs or call with no args
+                        if args and isinstance(args, dict) and args:
+                            result = route.handler(**args)
+                        else:
+                            result = route.handler()
+
+                    # If result is a coroutine (async function), await it
+                    if inspect.iscoroutine(result):
+                        result = asyncio.run(result)
+
+                    # Convert result to dict if it's a Pydantic model
+                    if hasattr(result, 'model_dump'):
+                        # Pydantic v2
+                        result_dict = result.model_dump()
+                    elif hasattr(result, 'dict'):
+                        # Pydantic v1
+                        result_dict = result.dict()
+                    else:
+                        # Plain dict or other serializable type
+                        result_dict = result
+
+                    print(f"[Worker {worker_id}] Task {task_id} succeeded: {result_dict}")
+                    protocol.send_task_result(task_id, True, result_dict)
+
+                except Exception as e:
+                    print(f"[Worker {worker_id}] Task {task_id} failed: {e}", file=sys.stderr)
+                    import traceback
+                    traceback.print_exc()
+                    error_msg = {"error": str(e), "type": type(e).__name__}
+                    protocol.send_task_result(task_id, False, error_msg)
             elif "Heartbeat" in message:
                 # Respond to heartbeat
                 protocol.send_heartbeat(worker_id)

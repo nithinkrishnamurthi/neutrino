@@ -53,11 +53,25 @@ impl WorkerHandle {
 
         info!("Spawning Python worker from {:?}", python_worker_path);
 
+        // Get the current working directory to add to PYTHONPATH
+        let cwd = std::env::current_dir()?;
+        let python_path = std::env::var("PYTHONPATH").unwrap_or_default();
+
+        // Add both the cwd and python/ directory to PYTHONPATH
+        let python_dir = cwd.join("python");
+        let new_python_path = if python_path.is_empty() {
+            format!("{}:{}", cwd.display(), python_dir.display())
+        } else {
+            format!("{}:{}:{}", python_path, cwd.display(), python_dir.display())
+        };
+
         let process = Command::new("python3")
             .arg(&python_worker_path)
             .arg(&socket_path)
             .arg(&worker_id)
             .arg(app_module)
+            .env("PYTHONPATH", new_python_path)
+            .current_dir(&cwd)
             .spawn()?;
 
         let pid = process.id();

@@ -56,6 +56,7 @@ orchestrator:
   #     mode: "mounted"
   #     port: 8081
   #     workers: 4
+  #     app_command: "uvicorn_app:app"  # Default, can be changed to "myapp:application"
   #
   # Example proxy mode config (Kubernetes):
   #   asgi:
