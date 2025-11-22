@@ -57,6 +57,9 @@ pub struct AsgiConfig {
     /// Request timeout in seconds for proxied requests
     #[serde(default = "default_asgi_timeout")]
     pub timeout_secs: u64,
+    /// Uvicorn app command (e.g., "uvicorn_app:app" or "myapp:application")
+    #[serde(default = "default_asgi_app_command")]
+    pub app_command: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -76,6 +79,10 @@ fn default_asgi_workers() -> usize {
 
 fn default_asgi_timeout() -> u64 {
     30
+}
+
+fn default_asgi_app_command() -> String {
+    "uvicorn_app:app".to_string()
 }
 
 impl Config {

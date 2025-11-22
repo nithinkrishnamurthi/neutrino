@@ -39,6 +39,7 @@ orchestrator:
     # Mounted mode options (runs Uvicorn locally):
     port: 8081  # Internal port for Uvicorn
     workers: 4  # Number of Uvicorn workers
+    app_command: "uvicorn_app:app"  # Uvicorn app command (default: "uvicorn_app:app")
 
     # Proxy mode options (forwards to external service):
     # service_url: "http://fastapi-service:8080"
