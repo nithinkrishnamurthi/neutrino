@@ -15,6 +15,7 @@ class App:
     def __init__(self):
         self._route_registry: dict[str, Route] = {}
         self._model_registry: dict[str, Model] = {}
+        self._asgi_app: Any | None = None
 
     def route(
         self,
@@ -127,6 +128,33 @@ class App:
             List of model names.
         """
         return list(self._model_registry.keys())
+
+    def mount_asgi(self, asgi_app: Any) -> None:
+        """Mount an ASGI application (e.g., FastAPI, Django) as a fallback handler.
+
+        The ASGI app will be served alongside Neutrino routes. Any route not
+        registered in Neutrino will automatically fall through to the ASGI app.
+        In mounted mode, the app runs in the same process via Uvicorn.
+        In proxy mode, requests are forwarded to a separate service.
+
+        Args:
+            asgi_app: ASGI application instance (e.g., FastAPI() app).
+
+        Example:
+            >>> from fastapi import FastAPI
+            >>> fastapi_app = FastAPI()
+            >>> neutrino_app = App()
+            >>> neutrino_app.mount_asgi(fastapi_app)
+        """
+        self._asgi_app = asgi_app
+
+    def get_asgi_app(self) -> Any | None:
+        """Get the mounted ASGI app.
+
+        Returns:
+            The ASGI app instance if mounted, None otherwise.
+        """
+        return self._asgi_app
 
     def generate_openapi(self, title: str = "Neutrino API", version: str = "1.0.0") -> dict[str, Any]:
         """Generate OpenAPI 3.0 specification from registered routes.

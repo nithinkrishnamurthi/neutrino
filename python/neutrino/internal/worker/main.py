@@ -17,6 +17,8 @@ import sys
 from typing import NoReturn
 import importlib
 
+import msgpack
+
 from neutrino.internal.worker.protocol import ProtocolHandler
 
 
@@ -67,11 +69,28 @@ def main() -> NoReturn:
                 break
             elif "TaskAssignment" in message:
                 # TODO: Execute task
-                task_id = message["TaskAssignment"]["task_id"]
-                func_name = message["TaskAssignment"]["function_name"]
-                print(f"[Worker {worker_id}] Task {task_id}: {func_name}")
-                # For now, just acknowledge
-                protocol.send_task_result(task_id, True, b"OK")
+                task_data = message["TaskAssignment"]
+
+                # Handle both dict format and tuple/list format from msgpack
+                if isinstance(task_data, dict):
+                    task_id = task_data["task_id"]
+                    func_name = task_data["function_name"]
+                    args = task_data["args"]  # Already decoded as native structure
+                elif isinstance(task_data, (list, tuple)):
+                    # Rust serializes as tuple: [task_id, function_name, args]
+                    task_id = task_data[0]
+                    func_name = task_data[1]
+                    args = task_data[2]  # Already decoded as native structure
+                else:
+                    print(f"[Worker {worker_id}] Error: unexpected TaskAssignment format: {type(task_data)}")
+                    continue
+
+                print(f"[Worker {worker_id}] Task {task_id}: {func_name}({args})")
+
+                # For now, just acknowledge with a simple response
+                # Result is sent as native msgpack value (no double encoding)
+                result = {"status": "ok", "message": "Task received"}
+                protocol.send_task_result(task_id, True, result)
             elif "Heartbeat" in message:
                 # Respond to heartbeat
                 protocol.send_heartbeat(worker_id)

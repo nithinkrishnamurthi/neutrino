@@ -1,4 +1,4 @@
-use neutrino_core::{Config, Orchestrator};
+use neutrino_core::{AsgiManager, Config, Orchestrator};
 use std::sync::Arc;
 use tracing::{error, info, Level};
 use tracing_subscriber;
@@ -33,15 +33,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Clone config values before moving into async block
     let http_host = config.orchestrator.http.host.clone();
     let http_port = config.orchestrator.http.port;
+    let openapi_spec = config.orchestrator.http.openapi_spec.clone();
+    let asgi_config = config.orchestrator.asgi.clone();
+
+    // Start ASGI manager if configured in mounted mode
+    let mut asgi_manager: Option<AsgiManager> = None;
+    if let Some(ref asgi_cfg) = asgi_config {
+        if asgi_cfg.enabled && asgi_cfg.mode == neutrino_core::config::AsgiMode::Mounted {
+            info!("Starting ASGI manager in mounted mode");
+            let mut manager = AsgiManager::new(asgi_cfg.clone());
+            match manager.start().await {
+                Ok(()) => {
+                    info!("ASGI manager started successfully");
+                    asgi_manager = Some(manager);
+                }
+                Err(e) => {
+                    error!("Failed to start ASGI manager: {}", e);
+                    error!("Continuing without ASGI integration");
+                }
+            }
+        } else if asgi_cfg.enabled {
+            info!("ASGI configured in proxy mode - no local process to manage");
+        }
+    }
 
     // Start HTTP server
     let server_orchestrator = Arc::clone(&orchestrator);
     let server_host = http_host.clone();
+    let server_asgi_config = asgi_config.clone();
     let server_handle = tokio::spawn(async move {
-        if let Err(e) = neutrino_core::http::start_server(
+        if let Err(e) = neutrino_core::http::start_server_with_openapi(
             server_orchestrator,
             server_host,
             http_port,
+            openapi_spec.as_deref(),
+            server_asgi_config,
         )
         .await
         {
@@ -59,12 +85,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Received shutdown signal");
 
-    // Gracefully shutdown
+    // Shutdown ASGI manager first (if running)
+    if let Some(mut manager) = asgi_manager {
+        info!("Shutting down ASGI manager");
+        if let Err(e) = manager.shutdown().await {
+            error!("Error shutting down ASGI manager: {}", e);
+        }
+    }
+
+    // Gracefully shutdown orchestrator
     orchestrator.shutdown().await?;
 
     // Wait for server to finish
     server_handle.abort();
 
-    info!("Orchestrator shutdown complete");
+    info!("Neutrino shutdown complete");
     Ok(())
 }

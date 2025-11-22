@@ -4,12 +4,15 @@ import json
 import sys
 from pathlib import Path
 
+# Add project root to sys.path for cli module imports
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import click
 
-from neutrino.cli.discovery import discover_app
-from neutrino.cli.manifest import generate_manifest, manifest_to_yaml
-
-import sys
+from cli.discovery import discover_app
+from cli.manifest import generate_manifest, manifest_to_yaml
 
 @click.group()
 @click.version_option(version="0.1.0", prog_name="neutrino")
@@ -94,11 +97,47 @@ def deploy(app_module: str, output: str | None, output_format: str, openapi: boo
             openapi_path.write_text(json.dumps(openapi_spec, indent=2))
             click.echo(f"OpenAPI spec written to {openapi_path}", err=True)
 
+            # Check if ASGI app is mounted and generate Uvicorn config
+            asgi_app = app.get_asgi_app()
+            if asgi_app:
+                asgi_module = f"{asgi_app.__class__.__module__}"
+
+                # Generate uvicorn startup script
+                uvicorn_script = f'''#!/usr/bin/env python3
+"""
+Auto-generated Uvicorn startup script for ASGI app.
+This script is used by Neutrino to run the ASGI app in mounted mode.
+"""
+
+import sys
+from pathlib import Path
+
+# Add current directory to path for imports
+sys.path.insert(0, str(Path.cwd()))
+
+# Import the app
+from {module_path.rsplit(":", 1)[0]} import *
+
+# Get the ASGI app instance
+asgi_application = app.get_asgi_app()
+if asgi_application is None:
+    raise RuntimeError("No ASGI app found in Neutrino app")
+
+# This is what Uvicorn will look for
+app = asgi_application
+'''
+
+                uvicorn_script_path = Path("uvicorn_app.py")
+                uvicorn_script_path.write_text(uvicorn_script)
+                click.echo(f"Uvicorn script written to {uvicorn_script_path}", err=True)
+                click.echo(f"  ASGI app will handle unmatched routes", err=True)
+
         # Summary
         route_count = len(manifest["routes"])
         model_count = len(manifest["models"])
+        asgi_status = "with ASGI integration" if app.get_asgi_app() else ""
         click.echo(
-            f"Discovered {route_count} routes and {model_count} models", err=True
+            f"Discovered {route_count} routes and {model_count} models {asgi_status}", err=True
         )
 
     except ImportError as e:

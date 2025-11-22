@@ -30,7 +30,7 @@ pub struct WorkerHandle {
 
 impl WorkerHandle {
     /// Spawn a new Python worker process and establish Unix socket connection
-    pub async fn spawn(worker_id: String) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn spawn(worker_id: String, app_module: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let socket_path = PathBuf::from(format!("/tmp/neutrino-{}.sock", worker_id));
 
         // Clean up old socket if it exists
@@ -57,6 +57,7 @@ impl WorkerHandle {
             .arg(&python_worker_path)
             .arg(&socket_path)
             .arg(&worker_id)
+            .arg(app_module)
             .spawn()?;
 
         let pid = process.id();
