@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neutrino
+  labels:
+    app: neutrino
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: neutrino
+  template:
+    metadata:
+      labels:
+        app: neutrino
+    spec:
+      containers:
+      - name: neutrino
+        image: neutrino:latest
+        imagePullPolicy: Never  # Use local image for k3s
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: asgi
+          containerPort: 8081
+          protocol: TCP
+        env:
+        - name: RUST_LOG
+          value: "info"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+        - name: app-code
+          mountPath: /app/openapi.json
+          subPath: openapi.json
+        - name: app-code
+          mountPath: /app/uvicorn_app.py
+          subPath: uvicorn_app.py
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 2
+      volumes:
+      - name: config
+        configMap:
+          name: neutrino-config
+      - name: app-code
+        configMap:
+          name: neutrino-app-code

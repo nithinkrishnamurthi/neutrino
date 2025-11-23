@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: neutrino
+  labels:
+    app: neutrino
+spec:
+  type: LoadBalancer
+  selector:
+    app: neutrino
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  - name: asgi
+    port: 8081
+    targetPort: 8081
+    protocol: TCP
