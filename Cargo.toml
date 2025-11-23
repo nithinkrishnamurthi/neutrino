@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "crates/neutrino-core",
+    "crates/neutrino-gateway",
 ]
 resolver = "2"

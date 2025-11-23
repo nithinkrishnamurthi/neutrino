@@ -24,12 +24,17 @@ class TaskStatus(str):
 
 class Task(BaseModel):
     id: str
-    function_name: str
+    function_name: Optional[str] = None
+    method: Optional[str] = None
+    path: Optional[str] = None
     status: str
-    created_at: datetime
+    created_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     worker_id: Optional[str] = None
+    status_code: Optional[int] = None
+    request_body: Optional[str] = None
+    response_body: Optional[str] = None
     args: Optional[dict] = None
     result: Optional[dict] = None
     error: Optional[str] = None
@@ -67,16 +72,21 @@ def init_db():
     conn = get_db()
     cursor = conn.cursor()
 
-    # Create tasks table
+    # Create tasks table (gateway schema)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             id TEXT PRIMARY KEY,
-            function_name TEXT NOT NULL,
+            function_name TEXT,
+            method TEXT,
+            path TEXT,
             status TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             started_at TIMESTAMP,
             completed_at TIMESTAMP,
             worker_id TEXT,
+            status_code INTEGER,
+            request_body TEXT,
+            response_body TEXT,
             args TEXT,
             result TEXT,
             error TEXT,
@@ -88,6 +98,8 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_status ON tasks(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON tasks(created_at)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_function_name ON tasks(function_name)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_method ON tasks(method)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_status_code ON tasks(status_code)")
 
     conn.commit()
     conn.close()
@@ -269,7 +281,15 @@ async def root():
                     <option value="failed">Failed</option>
                     <option value="cancelled">Cancelled</option>
                 </select>
-                <input type="text" id="functionFilter" placeholder="Filter by function..." onchange="loadTasks()">
+                <select id="methodFilter" onchange="loadTasks()">
+                    <option value="">All Methods</option>
+                    <option value="GET">GET</option>
+                    <option value="POST">POST</option>
+                    <option value="PUT">PUT</option>
+                    <option value="DELETE">DELETE</option>
+                    <option value="PATCH">PATCH</option>
+                </select>
+                <input type="text" id="pathFilter" placeholder="Filter by path..." onchange="loadTasks()">
                 <label style="margin-left: auto;">
                     <input type="checkbox" id="autoRefresh" onchange="toggleAutoRefresh()"> Auto-refresh (5s)
                 </label>
@@ -280,16 +300,17 @@ async def root():
                     <thead>
                         <tr>
                             <th>ID</th>
-                            <th>Function</th>
+                            <th>Method</th>
+                            <th>Path</th>
                             <th>Status</th>
-                            <th>Worker</th>
+                            <th>Status Code</th>
                             <th>Created</th>
                             <th>Duration</th>
                             <th>Error</th>
                         </tr>
                     </thead>
                     <tbody id="tasksBody">
-                        <tr><td colspan="7" style="text-align: center; padding: 2rem;">Loading...</td></tr>
+                        <tr><td colspan="8" style="text-align: center; padding: 2rem;">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -318,11 +339,13 @@ async def root():
 
             async function loadTasks() {
                 const status = document.getElementById('statusFilter').value;
-                const functionName = document.getElementById('functionFilter').value;
+                const method = document.getElementById('methodFilter').value;
+                const path = document.getElementById('pathFilter').value;
 
                 let url = '/api/tasks?limit=100';
                 if (status) url += `&status=${status}`;
-                if (functionName) url += `&function_name=${functionName}`;
+                if (method) url += `&method=${method}`;
+                if (path) url += `&path=${path}`;
 
                 try {
                     const response = await fetch(url);
@@ -330,16 +353,17 @@ async def root():
 
                     const tbody = document.getElementById('tasksBody');
                     if (tasks.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">No tasks found</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">No tasks found</td></tr>';
                         return;
                     }
 
                     tbody.innerHTML = tasks.map(task => `
                         <tr>
                             <td><span class="code">${task.id.substring(0, 8)}</span></td>
-                            <td>${task.function_name}</td>
+                            <td><span class="code">${task.method || '-'}</span></td>
+                            <td>${task.path || task.function_name || '-'}</td>
                             <td><span class="badge ${task.status}">${task.status}</span></td>
-                            <td>${task.worker_id ? '<span class="code">' + task.worker_id.substring(0, 8) + '</span>' : '-'}</td>
+                            <td>${task.status_code || '-'}</td>
                             <td>${new Date(task.created_at).toLocaleString()}</td>
                             <td>${task.duration_ms ? task.duration_ms.toFixed(2) + ' ms' : '-'}</td>
                             <td class="error">${task.error || '-'}</td>
@@ -350,7 +374,7 @@ async def root():
                 } catch (error) {
                     console.error('Failed to load tasks:', error);
                     document.getElementById('tasksBody').innerHTML =
-                        '<tr><td colspan="7" style="text-align: center; padding: 2rem; color: #ef4444;">Error loading tasks</td></tr>';
+                        '<tr><td colspan="8" style="text-align: center; padding: 2rem; color: #ef4444;">Error loading tasks</td></tr>';
                 }
             }
 
@@ -383,7 +407,7 @@ async def get_stats():
     conn = get_db()
     cursor = conn.cursor()
 
-    # Get counts by status
+    # Get counts by status (excluding health checks)
     cursor.execute("""
         SELECT
             COUNT(*) as total,
@@ -394,6 +418,7 @@ async def get_stats():
             SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled,
             AVG(CASE WHEN duration_ms IS NOT NULL THEN duration_ms END) as avg_duration_ms
         FROM tasks
+        WHERE (path IS NULL OR path != '/health')
     """)
 
     row = cursor.fetchone()
@@ -414,6 +439,9 @@ async def get_stats():
 async def get_tasks(
     status: Optional[str] = Query(None, description="Filter by status"),
     function_name: Optional[str] = Query(None, description="Filter by function name"),
+    method: Optional[str] = Query(None, description="Filter by HTTP method"),
+    path: Optional[str] = Query(None, description="Filter by path"),
+    status_code: Optional[int] = Query(None, description="Filter by HTTP status code"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of tasks to return"),
     offset: int = Query(0, ge=0, description="Number of tasks to skip")
 ):
@@ -424,6 +452,9 @@ async def get_tasks(
     query = "SELECT * FROM tasks WHERE 1=1"
     params = []
 
+    # Exclude health check requests
+    query += " AND (path IS NULL OR path != '/health')"
+
     if status:
         query += " AND status = ?"
         params.append(status)
@@ -431,6 +462,18 @@ async def get_tasks(
     if function_name:
         query += " AND function_name LIKE ?"
         params.append(f"%{function_name}%")
+
+    if method:
+        query += " AND method = ?"
+        params.append(method)
+
+    if path:
+        query += " AND path LIKE ?"
+        params.append(f"%{path}%")
+
+    if status_code:
+        query += " AND status_code = ?"
+        params.append(status_code)
 
     query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
@@ -442,11 +485,28 @@ async def get_tasks(
     tasks = []
     for row in rows:
         task_dict = dict(row)
-        # Parse JSON fields
+        # Parse JSON fields if present
         if task_dict.get("args"):
-            task_dict["args"] = json.loads(task_dict["args"])
+            try:
+                task_dict["args"] = json.loads(task_dict["args"])
+            except:
+                pass
         if task_dict.get("result"):
-            task_dict["result"] = json.loads(task_dict["result"])
+            try:
+                task_dict["result"] = json.loads(task_dict["result"])
+            except:
+                pass
+
+        # Parse datetime fields from RFC3339 strings
+        for date_field in ["created_at", "started_at", "completed_at"]:
+            if task_dict.get(date_field):
+                try:
+                    from dateutil.parser import isoparse
+                    task_dict[date_field] = isoparse(task_dict[date_field])
+                except:
+                    # If parsing fails, set to None
+                    task_dict[date_field] = None
+
         tasks.append(Task(**task_dict))
 
     return tasks
