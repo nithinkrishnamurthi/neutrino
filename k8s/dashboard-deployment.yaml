@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: neutrino-db-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neutrino-dashboard
+  labels:
+    app: neutrino-dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: neutrino-dashboard
+  template:
+    metadata:
+      labels:
+        app: neutrino-dashboard
+    spec:
+      containers:
+      - name: dashboard
+        image: neutrino-dashboard:latest
+        imagePullPolicy: Never  # Use local image for k3s
+        ports:
+        - containerPort: 8081
+          name: http
+        env:
+        - name: DB_PATH
+          value: "/data/neutrino.db"
+        volumeMounts:
+        - name: db-storage
+          mountPath: /data
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: db-storage
+        persistentVolumeClaim:
+          claimName: neutrino-db-pvc

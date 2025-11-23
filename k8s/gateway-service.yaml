@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: neutrino
+  name: neutrino-gateway
   labels:
-    app: neutrino
+    app: neutrino-gateway
 spec:
   type: LoadBalancer
   selector:
-    app: neutrino
+    app: neutrino-gateway
   ports:
   - name: http
     port: 8080

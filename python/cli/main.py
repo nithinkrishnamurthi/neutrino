@@ -311,38 +311,71 @@ def up(app_module: str, image_name: str, namespace: str, skip_docker: bool) -> N
     echo_color("")
 
     if not skip_docker:
-        # Step 3: Build Docker image
-        echo_color("[3/6] Building Docker image...", YELLOW)
-        run_command(f"docker build -t {image_name} .", "Docker build")
-        echo_color(f"✓ Docker image built: {image_name}", GREEN)
+        # Step 3: Build Docker images
+        echo_color("[3/7] Building Docker images...", YELLOW)
+
+        # Build main Neutrino image
+        run_command(f"docker build -t {image_name} .", "Docker build (neutrino)")
+
+        # Build dashboard image
+        dashboard_image = "neutrino-dashboard:latest"
+        run_command(f"docker build -t {dashboard_image} -f dashboard/Dockerfile dashboard/", "Docker build (dashboard)")
+
+        # Build gateway image
+        gateway_image = "neutrino-gateway:latest"
+        run_command(f"docker build -t {gateway_image} -f gateway/Dockerfile .", "Docker build (gateway)")
+
+        echo_color(f"✓ Docker images built", GREEN)
         echo_color("")
 
-        # Step 4: Import image to k3s
-        echo_color("[4/6] Importing image to k3s...", YELLOW)
+        # Step 4: Import images to k3s
+        echo_color("[4/7] Importing images to k3s...", YELLOW)
 
-        # Save Docker image to tar
-        run_command(f"docker save {image_name} -o /tmp/neutrino-image.tar", "Docker save")
+        # Save and import main Neutrino image
+        run_command(f"docker save {image_name} -o /tmp/neutrino-image.tar", "Docker save (neutrino)")
 
-        # Import to k3s
         if subprocess.run("command -v k3s", shell=True, capture_output=True).returncode == 0:
-            run_command("sudo k3s ctr images import /tmp/neutrino-image.tar", "k3s import")
+            run_command("sudo k3s ctr images import /tmp/neutrino-image.tar", "k3s import (neutrino)")
         elif subprocess.run("command -v crictl", shell=True, capture_output=True).returncode == 0:
-            run_command("sudo crictl pull docker-archive:///tmp/neutrino-image.tar", "crictl import", check=False)
+            run_command("sudo crictl pull docker-archive:///tmp/neutrino-image.tar", "crictl import (neutrino)", check=False)
         else:
-            echo_color("Warning: Could not import to k3s. Image may need to be pulled from registry.", YELLOW)
+            echo_color("Warning: Could not import neutrino to k3s. Image may need to be pulled from registry.", YELLOW)
 
-        # Clean up tar file
         subprocess.run("rm -f /tmp/neutrino-image.tar", shell=True)
 
-        echo_color("✓ Image imported to k3s", GREEN)
+        # Save and import dashboard image
+        run_command(f"docker save {dashboard_image} -o /tmp/neutrino-dashboard-image.tar", "Docker save (dashboard)")
+
+        if subprocess.run("command -v k3s", shell=True, capture_output=True).returncode == 0:
+            run_command("sudo k3s ctr images import /tmp/neutrino-dashboard-image.tar", "k3s import (dashboard)")
+        elif subprocess.run("command -v crictl", shell=True, capture_output=True).returncode == 0:
+            run_command("sudo crictl pull docker-archive:///tmp/neutrino-dashboard-image.tar", "crictl import (dashboard)", check=False)
+        else:
+            echo_color("Warning: Could not import dashboard to k3s. Image may need to be pulled from registry.", YELLOW)
+
+        subprocess.run("rm -f /tmp/neutrino-dashboard-image.tar", shell=True)
+
+        # Save and import gateway image
+        run_command(f"docker save {gateway_image} -o /tmp/neutrino-gateway-image.tar", "Docker save (gateway)")
+
+        if subprocess.run("command -v k3s", shell=True, capture_output=True).returncode == 0:
+            run_command("sudo k3s ctr images import /tmp/neutrino-gateway-image.tar", "k3s import (gateway)")
+        elif subprocess.run("command -v crictl", shell=True, capture_output=True).returncode == 0:
+            run_command("sudo crictl pull docker-archive:///tmp/neutrino-gateway-image.tar", "crictl import (gateway)", check=False)
+        else:
+            echo_color("Warning: Could not import gateway to k3s. Image may need to be pulled from registry.", YELLOW)
+
+        subprocess.run("rm -f /tmp/neutrino-gateway-image.tar", shell=True)
+
+        echo_color("✓ Images imported to k3s", GREEN)
         echo_color("")
     else:
-        echo_color("[3/6] Skipping Docker build (--skip-docker)", YELLOW)
-        echo_color("[4/6] Skipping image import (--skip-docker)", YELLOW)
+        echo_color("[3/7] Skipping Docker build (--skip-docker)", YELLOW)
+        echo_color("[4/7] Skipping image import (--skip-docker)", YELLOW)
         echo_color("")
 
     # Step 5: Create Kubernetes resources
-    echo_color("[5/6] Creating Kubernetes resources...", YELLOW)
+    echo_color("[5/7] Creating Kubernetes resources...", YELLOW)
 
     # Create ConfigMap from generated files
     run_command(
@@ -354,72 +387,102 @@ def up(app_module: str, image_name: str, namespace: str, skip_docker: bool) -> N
         "Create ConfigMap"
     )
 
-    # Apply all k8s manifests
+    # Apply all k8s manifests for main application
     run_command(f"kubectl apply -f k8s/configmap.yaml --namespace={namespace}", "Apply configmap.yaml")
     run_command(f"kubectl apply -f k8s/deployment.yaml --namespace={namespace}", "Apply deployment.yaml")
     run_command(f"kubectl apply -f k8s/service.yaml --namespace={namespace}", "Apply service.yaml")
 
+    # Apply dashboard manifests
+    run_command(f"kubectl apply -f k8s/dashboard-deployment.yaml --namespace={namespace}", "Apply dashboard-deployment.yaml")
+    run_command(f"kubectl apply -f k8s/dashboard-service.yaml --namespace={namespace}", "Apply dashboard-service.yaml")
+
+    # Apply gateway manifests
+    run_command(f"kubectl apply -f k8s/gateway-deployment.yaml --namespace={namespace}", "Apply gateway-deployment.yaml")
+    run_command(f"kubectl apply -f k8s/gateway-service.yaml --namespace={namespace}", "Apply gateway-service.yaml")
+
     echo_color("✓ Kubernetes resources created", GREEN)
     echo_color("")
 
-    # Step 6: Wait for deployment
-    echo_color("[6/6] Waiting for deployment to be ready...", YELLOW)
+    # Step 6: Wait for deployments
+    echo_color("[6/7] Waiting for deployments to be ready...", YELLOW)
+
+    # Wait for main deployment
     result = run_command(
         f"kubectl rollout status deployment/neutrino --namespace={namespace} --timeout=120s",
-        "Wait for rollout",
+        "Wait for neutrino rollout",
         check=False
     )
 
-    if result.returncode == 0:
-        echo_color("✓ Deployment ready", GREEN)
+    # Wait for dashboard deployment
+    dashboard_result = run_command(
+        f"kubectl rollout status deployment/neutrino-dashboard --namespace={namespace} --timeout=120s",
+        "Wait for dashboard rollout",
+        check=False
+    )
+
+    # Wait for gateway deployment
+    gateway_result = run_command(
+        f"kubectl rollout status deployment/neutrino-gateway --namespace={namespace} --timeout=120s",
+        "Wait for gateway rollout",
+        check=False
+    )
+
+    if result.returncode == 0 and dashboard_result.returncode == 0 and gateway_result.returncode == 0:
+        echo_color("✓ Deployments ready", GREEN)
     else:
         echo_color("Warning: Deployment may not be ready yet. Check with: kubectl get pods -n {namespace}", YELLOW)
 
     echo_color("")
 
-    # Display service info
+    # Step 7: Setup port forwarding
+    echo_color("[7/7] Setting up port forwarding...", YELLOW)
+
+    # Start port forwarding in background
+    echo_color("Starting port forward for Gateway (8080)...", NC)
+    subprocess.Popen(
+        f"kubectl port-forward -n {namespace} service/neutrino-gateway 8080:8080",
+        shell=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    echo_color("Starting port forward for Dashboard (8081)...", NC)
+    subprocess.Popen(
+        f"kubectl port-forward -n {namespace} service/neutrino-dashboard 8081:8081",
+        shell=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    # Give port forwards a moment to establish
+    import time
+    time.sleep(2)
+
+    echo_color("✓ Port forwarding active", GREEN)
+    echo_color("")
+
     echo_color("=== Deployment Complete ===", GREEN)
     echo_color("")
-    echo_color("Service endpoints:", NC)
-    subprocess.run(f"kubectl get service neutrino --namespace={namespace}", shell=True)
-    echo_color("")
-
-    # Get LoadBalancer IP/hostname
-    result = subprocess.run(
-        f"kubectl get service neutrino --namespace={namespace} -o jsonpath='{{.status.loadBalancer.ingress[0].ip}}'",
-        shell=True,
-        capture_output=True,
-        text=True
-    )
-    external_ip = result.stdout.strip()
-
-    if not external_ip:
-        result = subprocess.run(
-            f"kubectl get service neutrino --namespace={namespace} -o jsonpath='{{.status.loadBalancer.ingress[0].hostname}}'",
-            shell=True,
-            capture_output=True,
-            text=True
-        )
-        external_ip = result.stdout.strip()
-
-    if not external_ip:
-        echo_color("LoadBalancer external IP pending. For local k3s, try:", YELLOW)
-        echo_color("  http://localhost:8080", NC)
-    else:
-        echo_color("Neutrino is available at:", GREEN)
-        echo_color(f"  http://{external_ip}:8080", NC)
-
+    echo_color("Neutrino is available at:", GREEN)
+    echo_color("  Gateway (API): http://localhost:8080 (includes ASGI proxy + DB logging)", NC)
+    echo_color("  Dashboard:     http://localhost:8081", NC)
     echo_color("")
     echo_color("Test endpoints:", NC)
     echo_color("  Health check:  curl http://localhost:8080/health", NC)
-    echo_color("  FastAPI users: curl http://localhost:8080/api/users", NC)
-    echo_color("  Neutrino task: curl -X POST http://localhost:8080/neutrino/process -H 'Content-Type: application/json' -d '{\"text\":\"hello\",\"iterations\":100}'", NC)
+    echo_color("  Dashboard:     curl http://localhost:8081/health", NC)
+    echo_color("  View jobs:     open http://localhost:8081", NC)
     echo_color("")
     echo_color("View logs:", NC)
-    echo_color(f"  kubectl logs -f deployment/neutrino --namespace={namespace}", NC)
+    echo_color(f"  Gateway:   kubectl logs -f deployment/neutrino-gateway --namespace={namespace}", NC)
+    echo_color(f"  Neutrino:  kubectl logs -f deployment/neutrino --namespace={namespace}", NC)
+    echo_color(f"  Dashboard: kubectl logs -f deployment/neutrino-dashboard --namespace={namespace}", NC)
     echo_color("")
     echo_color("View pods:", NC)
-    echo_color(f"  kubectl get pods -l app=neutrino --namespace={namespace}", NC)
+    echo_color(f"  kubectl get pods --namespace={namespace}", NC)
+    echo_color("")
+    echo_color("Port forwarding is running in the background.", YELLOW)
+    echo_color("To stop port forwarding:", NC)
+    echo_color("  pkill -f 'kubectl port-forward.*neutrino'", NC)
     echo_color("")
 
 
@@ -478,6 +541,15 @@ def down(namespace: str, delete_all: bool) -> None:
     echo_color("=== Neutrino k3s Teardown ===", GREEN)
     echo_color("")
 
+    # Stop port forwarding first
+    echo_color("Stopping port forwarding...", YELLOW)
+    result = subprocess.run("pkill -f 'kubectl port-forward.*neutrino'", shell=True, capture_output=True)
+    if result.returncode == 0:
+        echo_color("✓ Port forwarding stopped", GREEN)
+    else:
+        echo_color("No active port forwarding found", NC)
+    echo_color("")
+
     # Check kubectl
     if subprocess.run("command -v kubectl", shell=True, capture_output=True).returncode != 0:
         echo_color("Error: kubectl not found. Please install kubectl.", RED)
@@ -492,17 +564,52 @@ def down(namespace: str, delete_all: bool) -> None:
     echo_color(f"Deleting Neutrino resources from namespace: {namespace}", YELLOW)
     echo_color("")
 
-    # Delete service
+    # Delete main service
     run_command(
         f"kubectl delete service neutrino --namespace={namespace}",
-        "Deleted Service",
+        "Deleted Service (neutrino)",
         check=False
     )
 
-    # Delete deployment
+    # Delete main deployment
     run_command(
         f"kubectl delete deployment neutrino --namespace={namespace}",
-        "Deleted Deployment",
+        "Deleted Deployment (neutrino)",
+        check=False
+    )
+
+    # Delete dashboard service
+    run_command(
+        f"kubectl delete service neutrino-dashboard --namespace={namespace}",
+        "Deleted Service (dashboard)",
+        check=False
+    )
+
+    # Delete dashboard deployment
+    run_command(
+        f"kubectl delete deployment neutrino-dashboard --namespace={namespace}",
+        "Deleted Deployment (dashboard)",
+        check=False
+    )
+
+    # Delete gateway service
+    run_command(
+        f"kubectl delete service neutrino-gateway --namespace={namespace}",
+        "Deleted Service (gateway)",
+        check=False
+    )
+
+    # Delete gateway deployment
+    run_command(
+        f"kubectl delete deployment neutrino-gateway --namespace={namespace}",
+        "Deleted Deployment (gateway)",
+        check=False
+    )
+
+    # Delete PVC for database (shared by dashboard and gateway)
+    run_command(
+        f"kubectl delete pvc neutrino-db-pvc --namespace={namespace}",
+        "Deleted PersistentVolumeClaim (database)",
         check=False
     )
 
@@ -525,7 +632,8 @@ def down(namespace: str, delete_all: bool) -> None:
     echo_color("=== Teardown Complete ===", GREEN)
     echo_color("")
     echo_color("To verify cleanup:", NC)
-    echo_color(f"  kubectl get all -l app=neutrino --namespace={namespace}", NC)
+    echo_color(f"  kubectl get all --namespace={namespace}", NC)
+    echo_color(f"  kubectl get pvc --namespace={namespace}", NC)
     echo_color("")
 
 
