@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: neutrino-config
+  labels:
+    app: neutrino
+data:
+  config.yaml: |
+    # Neutrino Orchestrator Configuration
+    orchestrator:
+      # Number of Python worker processes to spawn
+      worker_count: 4
+
+      # Python module containing your Neutrino app
+      app_module: "examples.fastapi_integration"
+
+      # HTTP server settings
+      http:
+        host: "0.0.0.0"
+        port: 8080
+        # Path to OpenAPI spec for dynamic route registration
+        openapi_spec: "/app/openapi.json"
+
+      # Worker lifecycle settings
+      worker:
+        # Maximum tasks before worker recycling
+        max_tasks_per_worker: 1000
+
+        # Maximum memory (MB) before worker recycling
+        max_memory_mb: 4096
+
+        # Worker startup timeout (seconds)
+        startup_timeout_secs: 10
+
+      # Task settings
+      tasks:
+        # Default timeout for synchronous tasks (seconds)
+        default_timeout_secs: 30
+
+      # Optional ASGI app integration
+      asgi:
+        enabled: true
+        mode: "mounted"
+        port: 8081
+        workers: 4
+        app_command: "uvicorn_app:app"
