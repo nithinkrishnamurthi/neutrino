@@ -26,6 +26,9 @@ class Route:
         summary: str | None = None,
         description: str | None = None,
         tags: list[str] | None = None,
+        num_cpus: float = 1.0,
+        num_gpus: float = 0.0,
+        memory_gb: float = 1.0,
     ):
         self.handler = handler
         self.path = path
@@ -35,6 +38,9 @@ class Route:
         self.summary = summary or handler.__name__.replace("_", " ").title()
         self.description = description or handler.__doc__
         self.tags = tags or []
+        self.num_cpus = num_cpus
+        self.num_gpus = num_gpus
+        self.memory_gb = memory_gb
         self.__name__ = handler.__name__
         self.__doc__ = handler.__doc__
 

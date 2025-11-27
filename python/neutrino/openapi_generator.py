@@ -104,6 +104,14 @@ def generate_operation(route: Any, method: str) -> dict[str, Any]:
     if route.description:
         operation["description"] = route.description
 
+    # Add resource requirements as OpenAPI extension
+    if hasattr(route, 'num_cpus') or hasattr(route, 'num_gpus') or hasattr(route, 'memory_gb'):
+        operation["x-neutrino-resources"] = {
+            "num_cpus": getattr(route, 'num_cpus', 1.0),
+            "num_gpus": getattr(route, 'num_gpus', 0.0),
+            "memory_gb": getattr(route, 'memory_gb', 1.0),
+        }
+
     # Parameters (path params)
     openapi_path = convert_path_to_openapi(route.path)
     path_params = extract_path_parameters(openapi_path)

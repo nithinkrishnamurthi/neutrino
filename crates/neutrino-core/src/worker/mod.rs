@@ -3,8 +3,9 @@ use std::process::{Child, Command};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{debug, error, info};
+use serde::{Deserialize, Serialize};
 
-use crate::protocol::Message;
+use crate::protocol::{Message, ResourceCapabilities};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WorkerState {
@@ -14,12 +15,37 @@ pub enum WorkerState {
     Recycling,
 }
 
+/// Current resource allocation state of a worker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceAllocation {
+    /// CPUs currently allocated
+    pub allocated_cpus: f64,
+    /// GPUs currently allocated
+    pub allocated_gpus: f64,
+    /// Memory currently allocated in GB
+    pub allocated_memory_gb: f64,
+}
+
+impl Default for ResourceAllocation {
+    fn default() -> Self {
+        Self {
+            allocated_cpus: 0.0,
+            allocated_gpus: 0.0,
+            allocated_memory_gb: 0.0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Worker {
     pub id: String,
     pub pid: u32,
     pub state: WorkerState,
     pub socket_path: PathBuf,
+    /// Total resource capabilities of this worker
+    pub capabilities: ResourceCapabilities,
+    /// Current resource allocation
+    pub allocation: ResourceAllocation,
 }
 
 pub struct WorkerHandle {
@@ -92,6 +118,8 @@ impl WorkerHandle {
             pid,
             state: WorkerState::Starting,
             socket_path,
+            capabilities: ResourceCapabilities::default(),
+            allocation: ResourceAllocation::default(),
         };
 
         Ok(Self {
@@ -131,9 +159,13 @@ impl WorkerHandle {
     /// Wait for the worker to send a Ready message
     pub async fn wait_ready(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         match self.recv().await? {
-            Message::WorkerReady { worker_id, pid } => {
-                info!("Worker {} ready (pid={})", worker_id, pid);
+            Message::WorkerReady { worker_id, pid, capabilities } => {
+                info!(
+                    "Worker {} ready (pid={}, cpus={}, gpus={}, mem={}GB)",
+                    worker_id, pid, capabilities.num_cpus, capabilities.num_gpus, capabilities.memory_gb
+                );
                 self.worker.state = WorkerState::Idle;
+                self.worker.capabilities = capabilities;
                 Ok(())
             }
             other => {

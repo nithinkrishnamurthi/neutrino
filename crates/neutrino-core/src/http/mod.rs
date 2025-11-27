@@ -176,6 +176,7 @@ async fn execute_task_no_body(
         task_id: task_id.clone(),
         function_name: handler_name.clone(),
         args,
+        resources: crate::protocol::ResourceRequirements::default(),
     };
 
     // Send task to worker
@@ -269,6 +270,7 @@ async fn execute_task_with_body(
         task_id: task_id.clone(),
         function_name: handler_name.clone(),
         args,
+        resources: crate::protocol::ResourceRequirements::default(),
     };
 
     // Send task to worker

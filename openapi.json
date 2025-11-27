@@ -5,68 +5,17 @@
     "version": "1.0.0"
   },
   "paths": {
-    "/api/users": {
-      "get": {
-        "operationId": "get_list_users",
-        "summary": "List Users",
-        "tags": [],
-        "description": "List all users.",
-        "responses": {
-          "200": {
-            "description": "Successful response"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      }
-    },
-    "/api/users/{user_id}": {
-      "get": {
-        "operationId": "get_get_user",
-        "summary": "Get User",
-        "tags": [],
-        "description": "Get a specific user by ID.",
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful response"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      }
-    },
-    "/api/products": {
-      "get": {
-        "operationId": "get_manage_products",
-        "summary": "Manage Products",
-        "tags": [],
-        "description": "List or create products.",
-        "responses": {
-          "200": {
-            "description": "Successful response"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      },
+    "/api/preprocess": {
       "post": {
-        "operationId": "post_manage_products",
-        "summary": "Manage Products",
+        "operationId": "post_preprocess_data",
+        "summary": "Lightweight preprocessing",
         "tags": [],
-        "description": "List or create products.",
+        "description": "Preprocess data with minimal CPU requirements",
+        "x-neutrino-resources": {
+          "num_cpus": 0.5,
+          "num_gpus": 0.0,
+          "memory_gb": 0.5
+        },
         "responses": {
           "200": {
             "description": "Successful response"
@@ -77,12 +26,80 @@
         }
       }
     },
-    "/api/health": {
-      "get": {
-        "operationId": "get_health",
-        "summary": "Health",
+    "/api/cpu-intensive": {
+      "post": {
+        "operationId": "post_heavy_computation",
+        "summary": "CPU-intensive computation",
         "tags": [],
-        "description": "Health check endpoint.",
+        "description": "Heavy computation requiring multiple CPU cores",
+        "x-neutrino-resources": {
+          "num_cpus": 4.0,
+          "num_gpus": 0.0,
+          "memory_gb": 8.0
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/inference": {
+      "post": {
+        "operationId": "post_run_inference",
+        "summary": "GPU-accelerated inference",
+        "tags": [],
+        "description": "Run ML model inference on GPU",
+        "x-neutrino-resources": {
+          "num_cpus": 2.0,
+          "num_gpus": 1.0,
+          "memory_gb": 16.0
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/multi-gpu": {
+      "post": {
+        "operationId": "post_distributed_training",
+        "summary": "Multi-GPU training",
+        "tags": [],
+        "description": "Distributed training across multiple GPUs",
+        "x-neutrino-resources": {
+          "num_cpus": 8.0,
+          "num_gpus": 4.0,
+          "memory_gb": 64.0
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/api/fractional-gpu": {
+      "post": {
+        "operationId": "post_small_model_inference",
+        "summary": "Fractional GPU usage",
+        "tags": [],
+        "description": "Share a GPU with other tasks",
+        "x-neutrino-resources": {
+          "num_cpus": 1.0,
+          "num_gpus": 0.25,
+          "memory_gb": 4.0
+        },
         "responses": {
           "200": {
             "description": "Successful response"

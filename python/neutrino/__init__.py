@@ -28,6 +28,9 @@ def route(
     summary: str | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
+    num_cpus: float = 1.0,
+    num_gpus: float = 0.0,
+    memory_gb: float = 1.0,
 ) -> Callable[[Callable[..., Any]], Route]:
     """Decorator to register a function as an orchestrated route.
 
@@ -39,6 +42,9 @@ def route(
         summary: Optional short summary for OpenAPI documentation.
         description: Optional detailed description for OpenAPI documentation.
         tags: Optional list of tags for grouping routes in OpenAPI docs.
+        num_cpus: CPUs required (logical cores, can be fractional). Defaults to 1.0.
+        num_gpus: GPUs required (devices, can be fractional). Defaults to 0.0.
+        memory_gb: Memory required in GB. Defaults to 1.0.
 
     Returns:
         Decorator function that registers the route.
@@ -47,6 +53,10 @@ def route(
         >>> @route("/api/users", methods=["GET"])
         ... def list_users():
         ...     return {"users": [...]}
+
+        >>> @route("/inference", methods=["POST"], num_cpus=2, num_gpus=1)
+        ... def run_inference(data: dict):
+        ...     return model.predict(data)
     """
     if methods is None:
         methods = ["GET"]
@@ -61,6 +71,9 @@ def route(
             summary,
             description,
             tags,
+            num_cpus,
+            num_gpus,
+            memory_gb,
         )
         _global_route_registry[path] = route_obj
         return route_obj
