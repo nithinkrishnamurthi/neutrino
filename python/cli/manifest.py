@@ -1,36 +1,40 @@
 """Manifest generation for Neutrino applications."""
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict
 
 import yaml
 
-from neutrino import App
+from neutrino.route import Route
+from neutrino.model import Model
 from cli.discovery import get_class_path, get_handler_path
 
 
-def generate_manifest(app: App, module_path: str) -> dict[str, Any]:
+def generate_manifest(
+    route_registry: Dict[str, Route],
+    model_registry: Dict[str, Model],
+    module_path: str
+) -> dict[str, Any]:
     """
-    Generate deployment manifest dictionary from App instance.
+    Generate deployment manifest dictionary from route and model registries.
 
     Args:
-        app: The Neutrino App instance
-        module_path: The module path where the app was found
+        route_registry: Dictionary of registered routes
+        model_registry: Dictionary of registered models
+        module_path: The module path where routes were discovered
 
     Returns:
         Dictionary containing the deployment manifest
     """
     routes_dict: dict[str, dict[str, Any]] = {}
-    for path in app.list_routes():
-        route = app.get_route(path)
+    for path, route in route_registry.items():
         routes_dict[path] = {
             "methods": route.methods,
             "handler": get_handler_path(route.handler),
         }
 
     models_dict: dict[str, dict[str, Any]] = {}
-    for name in app.list_models():
-        model = app.get_model(name)
+    for name, model in model_registry.items():
         models_dict[name] = {
             "class": get_class_path(model.config.cls),
             "min_replicas": model.config.min_replicas,

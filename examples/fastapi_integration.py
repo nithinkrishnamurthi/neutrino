@@ -24,7 +24,7 @@ Architecture:
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from neutrino import App
+from neutrino import route, mount_asgi
 
 # ============================================================================
 # FastAPI Application (existing code, unchanged)
@@ -89,10 +89,8 @@ def delete_user(user_id: int):
     return {"message": "User deleted"}
 
 # ============================================================================
-# Neutrino Application (heavy compute tasks)
+# Neutrino Routes (heavy compute tasks)
 # ============================================================================
-
-app = App()
 
 class TaskRequest(BaseModel):
     text: str
@@ -102,7 +100,7 @@ class TaskResponse(BaseModel):
     result: str
     processed_chars: int
 
-@app.route("/neutrino/process", methods=["POST"])
+@route("/neutrino/process", methods=["POST"])
 async def heavy_processing(request: TaskRequest) -> TaskResponse:
     """
     CPU-intensive task that benefits from Neutrino's worker pool.
@@ -131,7 +129,7 @@ class AnalysisResponse(BaseModel):
     median: float
     std_dev: float
 
-@app.route("/neutrino/analyze", methods=["POST"])
+@route("/neutrino/analyze", methods=["POST"])
 async def analyze_data(request: AnalysisRequest) -> AnalysisResponse:
     """
     Statistical analysis task.
@@ -155,7 +153,7 @@ async def analyze_data(request: AnalysisRequest) -> AnalysisResponse:
 # ============================================================================
 
 # This tells Neutrino to use FastAPI as a fallback for unmatched routes
-app.mount_asgi(fastapi_app)
+mount_asgi(fastapi_app)
 
 # ============================================================================
 # Configuration
@@ -198,7 +196,7 @@ Then:
        -d '{"user_id": 1, "data": [1.5, 2.3, 3.7, 4.2, 5.8]}'
 
 How it works:
-- Routes registered in Neutrino (@app.route) go to the orchestrator
+- Routes registered in Neutrino (@route) go to the orchestrator
 - All other routes automatically fall through to the FastAPI app
 - No prefix required - routes intermix naturally!
 """
