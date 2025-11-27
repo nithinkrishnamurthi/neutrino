@@ -6,14 +6,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Add project root to sys.path for cli module imports
-project_root = Path(__file__).parent.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
 import click
 
-from cli.discovery import discover_app
+from cli.discovery import import_module
 from cli.manifest import generate_manifest, manifest_to_yaml
 
 @click.group()
@@ -65,19 +60,27 @@ def deploy(app_module: str, output: str | None, output_format: str, openapi: boo
 
 
     # Handle module:variable syntax
-
-    module_path = app_module
+    if ":" in app_module:
+        module_path = app_module.split(":", 1)[0]
+    else:
+        module_path = app_module
 
     # Add current directory to path for local imports
     sys.path.insert(0, str(Path.cwd()))
 
     try:
-        # Discover app
+        # Import module to trigger route registration
         click.echo(f"Discovering routes in {module_path}...", err=True)
-        app = discover_app(module_path)
+        import_module(module_path)
+
+        # Get global registries from neutrino
+        import neutrino
+        route_registry = neutrino._global_route_registry
+        model_registry = neutrino._global_model_registry
+        asgi_app = neutrino._global_asgi_app
 
         # Generate manifest
-        manifest = generate_manifest(app, module_path)
+        manifest = generate_manifest(route_registry, model_registry, module_path)
 
         # Format output
         if output_format == "yaml":
@@ -94,16 +97,13 @@ def deploy(app_module: str, output: str | None, output_format: str, openapi: boo
 
         # Generate OpenAPI spec if requested
         if openapi:
-            openapi_spec = app.generate_openapi()
+            openapi_spec = neutrino.generate_openapi()
             openapi_path = Path("openapi.json")
             openapi_path.write_text(json.dumps(openapi_spec, indent=2))
             click.echo(f"OpenAPI spec written to {openapi_path}", err=True)
 
             # Check if ASGI app is mounted and generate Uvicorn config
-            asgi_app = app.get_asgi_app()
             if asgi_app:
-                asgi_module = f"{asgi_app.__class__.__module__}"
-
                 # Generate uvicorn startup script
                 uvicorn_script = f'''#!/usr/bin/env python3
 """
@@ -117,13 +117,15 @@ from pathlib import Path
 # Add current directory to path for imports
 sys.path.insert(0, str(Path.cwd()))
 
-# Import the app
-from {module_path.rsplit(":", 1)[0]} import *
+# Import the module to trigger registration
+from cli.discovery import import_module
+import_module("{module_path}")
 
 # Get the ASGI app instance
-asgi_application = app.get_asgi_app()
+import neutrino
+asgi_application = neutrino.get_asgi_app()
 if asgi_application is None:
-    raise RuntimeError("No ASGI app found in Neutrino app")
+    raise RuntimeError("No ASGI app found in Neutrino")
 
 # This is what Uvicorn will look for
 app = asgi_application
@@ -137,7 +139,7 @@ app = asgi_application
         # Summary
         route_count = len(manifest["routes"])
         model_count = len(manifest["models"])
-        asgi_status = "with ASGI integration" if app.get_asgi_app() else ""
+        asgi_status = "with ASGI integration" if asgi_app else ""
         click.echo(
             f"Discovered {route_count} routes and {model_count} models {asgi_status}", err=True
         )

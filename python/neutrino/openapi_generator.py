@@ -4,9 +4,10 @@ OpenAPI 3.0 specification generator for Neutrino routes.
 
 import inspect
 import re
-from typing import Any
+from typing import Any, Dict
 
-from neutrino import App
+from neutrino.route import Route
+from neutrino.model import Model
 
 try:
     from pydantic import BaseModel
@@ -152,14 +153,22 @@ def generate_operation(route: Any, method: str) -> dict[str, Any]:
     return operation
 
 
-def generate_openapi_spec(app: App, title: str = "Neutrino API", version: str = "1.0.0") -> dict[str, Any]:
+def generate_openapi_spec(
+    route_registry: Dict[str, Route],
+    model_registry: Dict[str, Model],
+    title: str = "Neutrino API",
+    version: str = "1.0.0",
+    asgi_app: Any = None,
+) -> dict[str, Any]:
     """
-    Generate OpenAPI 3.0 specification from Neutrino App.
+    Generate OpenAPI 3.0 specification from Neutrino route registry.
 
     Args:
-        app: Neutrino App instance
+        route_registry: Dictionary of registered routes
+        model_registry: Dictionary of registered models
         title: API title
         version: API version
+        asgi_app: Optional ASGI app instance
 
     Returns:
         OpenAPI 3.0 specification dictionary
@@ -177,7 +186,6 @@ def generate_openapi_spec(app: App, title: str = "Neutrino API", version: str = 
     }
 
     # Add ASGI app metadata if mounted
-    asgi_app = app.get_asgi_app()
     if asgi_app:
         # Use OpenAPI extension field for Neutrino-specific metadata
         spec["x-neutrino-asgi"] = {
@@ -189,8 +197,7 @@ def generate_openapi_spec(app: App, title: str = "Neutrino API", version: str = 
     schemas: dict[str, Any] = {}
 
     # Generate paths from routes
-    for route_path in app.list_routes():
-        route = app.get_route(route_path)
+    for route_path, route in route_registry.items():
         openapi_path = convert_path_to_openapi(route.path)
 
         if openapi_path not in spec["paths"]:

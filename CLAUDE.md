@@ -93,7 +93,7 @@ Tier 2 - Task Orchestration Pods:
 
 1 Rust orchestrator per pod
 8-16 Python workers per pod
-Handle @app.task() functions
+Handle @route() decorated functions
 Scale based on task queue depth
 
 Tier 3 - Model Serving Pods:
@@ -101,7 +101,7 @@ Tier 3 - Model Serving Pods:
 One deployment PER model
 Lightweight model server
 Independent autoscaling per model
-Handle @app.model() classes
+Handle @model() decorated classes
 
 Why separate tiers?
 
@@ -139,14 +139,47 @@ Metrics collection
 
 2. Python SDK (/python/neutrino)
 Purpose: User-facing API and worker runtime
-Key modules:
 
-app.py - Main App() class with decorators
-task.py - Task definition and execution
-model.py - Model registration and serving
-worker/main.py - Worker process entry point
-worker/protocol.py - Message handling
-bridge.py - Rust ↔ Python FFI via PyO3
+**User API (New Global Registry Pattern):**
+The Python SDK uses a global route registry instead of an App class for simpler integration:
+
+```python
+from neutrino import route, mount_asgi
+
+# Register routes with decorators (no App object needed)
+@route("/api/users", methods=["GET"])
+def list_users():
+    return {"users": [...]}
+
+# Optional: mount ASGI app for non-Neutrino routes
+from fastapi import FastAPI
+app = FastAPI()
+mount_asgi(app)  # Routes not in Neutrino fall through to FastAPI
+```
+
+Key modules:
+- `__init__.py` - Global registry and `@route()`, `@model()` decorators
+- `route.py` - Route object definition
+- `model.py` - Model registration and serving
+- `worker/main.py` - Worker process entry point
+- `worker/protocol.py` - Message handling
+- `openapi_generator.py` - OpenAPI spec generation from routes
+
+**CLI Usage:**
+All CLI commands should be run with `uv run`:
+
+```bash
+# Generate deployment manifest and OpenAPI spec
+uv run neutrino deploy examples.fastapi_integration --openapi
+
+# Deploy to k8s
+uv run neutrino up
+
+# Tear down deployment
+uv run neutrino down
+```
+
+The CLI discovers routes by importing the module, which triggers route registration via decorators.
 
 3. Model Serving Layer (/neutrino/serving)
 Purpose: ML model deployment and autoscaling
@@ -268,20 +301,26 @@ Models: N identical replicas of SAME model
 Tasks: Heterogeneous workers with different code
 
 Architecture:
-python# User defines model
-@app.model(name="sentiment", min_replicas=1, max_replicas=10)
+```python
+from neutrino import route, model
+
+# User defines model
+@model(name="sentiment", min_replicas=1, max_replicas=10)
 class SentimentAnalyzer:
     def load(self):
         self.model = pipeline("sentiment-analysis")
-    
+
     def predict(self, text: str):
         return self.model(text)
 
-# Used in task
-@app.task()
+# Used in route
+@route("/analyze", methods=["POST"])
 async def analyze(text: str):
     # Makes HTTP call to model pod
-    return await app.models.sentiment.predict(text)
+    from neutrino import get_model
+    sentiment = get_model("sentiment")
+    return await sentiment.predict(text)
+```
 Deployment creates:
 yaml# One deployment PER model
 Deployment: neutrino-model-sentiment
@@ -312,7 +351,7 @@ HorizontalPodAutoscaler: neutrino-model-sentiment-hpa
 5. [ ] Task execution (send task to worker, get result)
 6. [ ] Worker pool (spawn N workers)
 7. [ ] Worker recycling (memory monitoring)
-8. [ ] Python SDK (`@app.task()` decorator)
+8. [ ] Python SDK (`@route()` decorator)
 9. [ ] Basic metrics (Prometheus)
 
 **Not included in v0.1:**
@@ -363,14 +402,14 @@ neutrino/
 │   │   └── metrics.rs       # Prometheus metrics
 │   └── Cargo.toml
 ├── python/neutrino/         # Python SDK
-│   ├── __init__.py
-│   ├── app.py               # Main App class
-│   ├── task.py              # Task decorators
-│   ├── model.py             # Model decorators
+│   ├── __init__.py          # Global registry + @route/@model decorators
+│   ├── route.py             # Route object definition
+│   ├── model.py             # Model registration
+│   ├── openapi_generator.py # OpenAPI spec generation
 │   ├── worker/
 │   │   ├── __init__.py
-│   │   ├── main.py          # ← FIRST TICKET: Worker entry point
-│   │   └── protocol.py      # ← FIRST TICKET: Message handling
+│   │   ├── main.py          # Worker entry point
+│   │   └── protocol.py      # Message handling
 │   └── bridge.py            # PyO3 bindings (later)
 ├── examples/                # Usage examples
 ├── docs/                    # Documentation
@@ -580,15 +619,15 @@ Models: Separate deployment tier, independent scaling
 
 Key Files
 
-rust/src/worker/spawner.rs - Worker spawning ← START HERE
-python/neutrino/worker/main.py - Worker entry point ← START HERE
+rust/src/worker/spawner.rs - Worker spawning
+python/neutrino/worker/main.py - Worker entry point
 rust/src/protocol/message.rs - Message types
-python/neutrino/app.py - User-facing App class
+python/neutrino/__init__.py - User-facing API (global registry + decorators)
 
 Next Steps
 
 ✅ First ticket: Worker spawning + socket communication
+✅ Python SDK with global route registry (@route() decorator)
  Task queue implementation
  Task execution (send/receive)
  Worker pool management
- Python SDK (@app.task())
