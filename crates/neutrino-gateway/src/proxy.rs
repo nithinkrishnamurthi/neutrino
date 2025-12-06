@@ -4,6 +4,7 @@ use axum::{
     http::{Request, Response, StatusCode},
     response::IntoResponse,
 };
+use neutrino_core::openapi::ResourceRouter;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{error, info};
@@ -17,6 +18,7 @@ pub struct AppState {
     pub backend_pool: Arc<BackendPool>,
     pub http_client: reqwest::Client,
     pub db_logger: Arc<DbLogger>,
+    pub resource_router: Arc<ResourceRouter>,
 }
 
 /// Proxy handler that forwards requests to the backend and logs to database
@@ -68,14 +70,14 @@ pub async fn proxy_handler(
 
     let start = Instant::now();
 
-    // Extract resource requirements
-    // TODO: Parse OpenAPI spec to get actual requirements per route
-    // For now, use heuristics: GPU tasks typically have "gpu" in path
-    let (cpus, gpus, memory_gb) = if path.contains("gpu") || path.contains("GPU") {
-        (1.0, 1.0, 2.0) // GPU task
-    } else {
-        (1.0, 0.0, 1.0) // CPU-only task
-    };
+    // Extract resource requirements from OpenAPI spec
+    let requirements = state.resource_router.get_requirements(
+        &method.to_string(),
+        &path
+    );
+    let cpus = requirements.num_cpus;
+    let gpus = requirements.num_gpus;
+    let memory_gb = requirements.memory_gb;
 
     // Find backend with sufficient resources
     let backend = state

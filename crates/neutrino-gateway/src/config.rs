@@ -12,6 +12,9 @@ pub struct GatewayConfig {
     // Capacity monitoring
     pub capacity_update_interval_secs: u64,
     pub capacity_timeout_secs: u64,
+
+    // OpenAPI spec for resource-aware routing
+    pub openapi_spec_path: String,
 }
 
 impl GatewayConfig {
@@ -25,6 +28,9 @@ impl GatewayConfig {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
+
+        let openapi_spec_path = env::var("OPENAPI_SPEC_PATH")
+            .expect("OPENAPI_SPEC_PATH environment variable is required");
 
         Self {
             port: env::var("GATEWAY_PORT")
@@ -43,6 +49,7 @@ impl GatewayConfig {
                 .unwrap_or_else(|_| "5".to_string())
                 .parse()
                 .unwrap_or(5),
+            openapi_spec_path,
         }
     }
 }

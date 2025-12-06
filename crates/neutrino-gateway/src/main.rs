@@ -4,6 +4,7 @@ mod db_logger;
 mod proxy;
 
 use axum::{routing::any, Router};
+use neutrino_core::openapi::ResourceRouter;
 use std::sync::Arc;
 use tracing::{info, Level};
 use tracing_subscriber;
@@ -57,11 +58,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start backend pool monitoring
     backend_pool.start().await?;
 
+    // Load OpenAPI spec for resource-aware routing
+    info!("Loading OpenAPI spec from: {}", config.openapi_spec_path);
+    let resource_router = Arc::new(ResourceRouter::from_file(&config.openapi_spec_path)?);
+    info!("OpenAPI spec loaded successfully");
+
     // Create app state
     let state = AppState {
         backend_pool,
         http_client,
         db_logger,
+        resource_router,
     };
 
     // Create router - catch all requests and proxy them
