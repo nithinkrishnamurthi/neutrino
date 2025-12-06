@@ -9,11 +9,12 @@ use std::time::Instant;
 use tracing::{error, info};
 use uuid::Uuid;
 
+use crate::backend_pool::BackendPool;
 use crate::db_logger::{DbLogger, LogEntry};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub backend_url: String,
+    pub backend_pool: Arc<BackendPool>,
     pub http_client: reqwest::Client,
     pub db_logger: Arc<DbLogger>,
 }
@@ -67,8 +68,64 @@ pub async fn proxy_handler(
 
     let start = Instant::now();
 
+    // Extract resource requirements
+    // TODO: Parse OpenAPI spec to get actual requirements per route
+    // For now, use heuristics: GPU tasks typically have "gpu" in path
+    let (cpus, gpus, memory_gb) = if path.contains("gpu") || path.contains("GPU") {
+        (1.0, 1.0, 2.0) // GPU task
+    } else {
+        (1.0, 0.0, 1.0) // CPU-only task
+    };
+
+    // Find backend with sufficient resources
+    let backend = state
+        .backend_pool
+        .find_backend_with_resources(cpus, gpus, memory_gb)
+        .await;
+
+    let backend_url = match backend {
+        Some(b) => {
+            info!(
+                "Routing {} to backend {} (requires: cpus={}, gpus={}, mem={}GB)",
+                path, b.url, cpus, gpus, memory_gb
+            );
+            b.url
+        }
+        None => {
+            error!(
+                "No backends available with required resources (cpus={}, gpus={}, mem={}GB)",
+                cpus, gpus, memory_gb
+            );
+
+            let duration_ms = start.elapsed().as_millis() as f64;
+
+            // Log failure - preserve created_at from initial log
+            state.db_logger.log(LogEntry {
+                id: task_id,
+                function_name: Some(function_name),
+                method: method.to_string(),
+                path,
+                status: "failed".to_string(),
+                created_at: Some(created_at),
+                completed_at: Some(chrono::Utc::now().to_rfc3339()),
+                duration_ms: Some(duration_ms),
+                request_body: Some(truncate_body(&request_body, 10000)),
+                error: Some(format!(
+                    "No backends available with resources: cpus={}, gpus={}, mem={}GB",
+                    cpus, gpus, memory_gb
+                )),
+                ..Default::default()
+            });
+
+            return Err(ProxyError::NoCapacity(format!(
+                "No backends available with required resources: cpus={}, gpus={}, mem={}GB",
+                cpus, gpus, memory_gb
+            )));
+        }
+    };
+
     // Build target URL
-    let target_url = format!("{}{}{}", state.backend_url, path, query);
+    let target_url = format!("{}{}{}", backend_url, path, query);
 
     // Build proxy request
     let mut proxy_req = state
@@ -195,6 +252,7 @@ pub enum ProxyError {
     BodyReadError(String),
     BackendError(String),
     ResponseBuildError(String),
+    NoCapacity(String),
 }
 
 impl IntoResponse for ProxyError {
@@ -211,6 +269,10 @@ impl IntoResponse for ProxyError {
             ProxyError::ResponseBuildError(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to build response: {}", e),
+            ),
+            ProxyError::NoCapacity(e) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("No capacity available: {}", e),
             ),
         };
 
