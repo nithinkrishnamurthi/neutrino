@@ -244,3 +244,39 @@ mod tests {
         assert_eq!(extract_handler_name("custom_handler"), "custom_handler");
     }
 }
+
+/// Resource router for mapping HTTP routes to resource requirements
+#[derive(Debug, Clone)]
+pub struct ResourceRouter {
+    /// Map from (method, path) to resource requirements
+    route_map: HashMap<(String, String), ResourceRequirements>,
+}
+
+impl ResourceRouter {
+    /// Create a ResourceRouter from an OpenAPI specification
+    pub fn from_spec(spec: &OpenApiSpec) -> Self {
+        let mut route_map = HashMap::new();
+
+        for route in spec.extract_routes() {
+            let key = (route.method, route.path);
+            route_map.insert(key, route.resources);
+        }
+
+        Self { route_map }
+    }
+
+    /// Create a ResourceRouter from an OpenAPI spec file
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let spec = OpenApiSpec::from_file(path)?;
+        Ok(Self::from_spec(&spec))
+    }
+
+    /// Get resource requirements for a route, returning default if not found
+    pub fn get_requirements(&self, method: &str, path: &str) -> ResourceRequirements {
+        let key = (method.to_uppercase(), path.to_string());
+        self.route_map
+            .get(&key)
+            .cloned()
+            .unwrap_or_default()
+    }
+}

@@ -1,12 +1,15 @@
+mod backend_pool;
 mod config;
 mod db_logger;
 mod proxy;
 
 use axum::{routing::any, Router};
+use neutrino_core::openapi::ResourceRouter;
 use std::sync::Arc;
 use tracing::{info, Level};
 use tracing_subscriber;
 
+use crate::backend_pool::{BackendPool, DiscoveryMode};
 use crate::config::GatewayConfig;
 use crate::db_logger::DbLogger;
 use crate::proxy::{proxy_handler, AppState};
@@ -23,8 +26,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Configuration:");
     info!("  Port: {}", config.port);
-    info!("  Backend URL: {}", config.backend_url);
+    info!("  Discovery mode: {}", config.discovery_mode);
+    if config.discovery_mode == "static" {
+        info!("  Static backends: {:?}", config.static_backends);
+    }
     info!("  Database path: {}", config.database_path);
+    info!("  Capacity update interval: {}s", config.capacity_update_interval_secs);
 
     // Initialize database logger
     let db_logger = Arc::new(DbLogger::new(config.database_path.clone()));
@@ -34,11 +41,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .timeout(std::time::Duration::from_secs(300)) // 5 minute timeout
         .build()?;
 
+    // Initialize backend pool
+    let discovery_mode = match config.discovery_mode.as_str() {
+        "static" => DiscoveryMode::Static(config.static_backends.clone()),
+        _ => {
+            return Err(format!("Unsupported discovery mode: {}", config.discovery_mode).into());
+        }
+    };
+
+    let backend_pool = Arc::new(BackendPool::new(
+        discovery_mode,
+        config.capacity_update_interval_secs,
+        config.capacity_timeout_secs,
+    ));
+
+    // Start backend pool monitoring
+    backend_pool.start().await?;
+
+    // Load OpenAPI spec for resource-aware routing
+    info!("Loading OpenAPI spec from: {}", config.openapi_spec_path);
+    let resource_router = Arc::new(ResourceRouter::from_file(&config.openapi_spec_path)?);
+    info!("OpenAPI spec loaded successfully");
+
     // Create app state
     let state = AppState {
-        backend_url: config.backend_url.clone(),
+        backend_pool,
         http_client,
         db_logger,
+        resource_router,
     };
 
     // Create router - catch all requests and proxy them

@@ -788,6 +788,7 @@ dependencies = [
  "axum",
  "chrono",
  "hyper",
+ "neutrino-core",
  "reqwest",
  "rusqlite",
  "serde",
