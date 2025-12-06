@@ -524,16 +524,38 @@ perf for system-level profiling
 
 Common Development Tasks
 Running Locally
-bash# Build Rust
-cd rust/
-cargo build
 
-# Run orchestrator
-cargo run
+For **local development** (single-machine testing):
+```bash
+# Build Rust binaries
+cargo build --release
 
-# Run tests
+# Start orchestrator directly (for testing/debugging)
+cargo run --release --bin neutrino-core config.yaml
+```
+
+For **Kubernetes deployment** (production-like):
+```bash
+# Generate deployment manifests and OpenAPI spec
+uv run neutrino deploy examples.fastapi_integration --openapi
+
+# Deploy to k8s cluster
+uv run neutrino up
+
+# Tear down deployment
+uv run neutrino down
+
+# Check deployment status
+kubectl get pods -l app=neutrino
+```
+
+**Important**: Always use `uv run neutrino up/down` for managing k8s deployments. Do NOT manually run `cargo run` or `pkill` for production deployments.
+
+Running tests:
+```bash
 cargo test
 pytest
+```
 Debugging
 Rust side:
 bash# Enable debug logging

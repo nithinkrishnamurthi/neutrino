@@ -1,108 +1,152 @@
 {
   "openapi": "3.0.0",
   "info": {
-    "title": "GPU Resources API",
+    "title": "Neutrino API",
     "version": "1.0.0"
   },
   "paths": {
-    "/api/preprocess": {
+    "/neutrino/process": {
       "post": {
-        "operationId": "post_preprocess_data",
-        "summary": "Lightweight preprocessing",
+        "operationId": "post_heavy_processing",
+        "summary": "Heavy Processing",
         "tags": [],
-        "description": "Preprocess data with minimal CPU requirements",
-        "x-neutrino-resources": {
-          "num_cpus": 0.5,
-          "num_gpus": 0.0,
-          "memory_gb": 0.5
-        },
-        "responses": {
-          "200": {
-            "description": "Successful response"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      }
-    },
-    "/api/cpu-intensive": {
-      "post": {
-        "operationId": "post_heavy_computation",
-        "summary": "CPU-intensive computation",
-        "tags": [],
-        "description": "Heavy computation requiring multiple CPU cores",
-        "x-neutrino-resources": {
-          "num_cpus": 4.0,
-          "num_gpus": 0.0,
-          "memory_gb": 8.0
-        },
-        "responses": {
-          "200": {
-            "description": "Successful response"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      }
-    },
-    "/api/inference": {
-      "post": {
-        "operationId": "post_run_inference",
-        "summary": "GPU-accelerated inference",
-        "tags": [],
-        "description": "Run ML model inference on GPU",
-        "x-neutrino-resources": {
-          "num_cpus": 2.0,
-          "num_gpus": 1.0,
-          "memory_gb": 16.0
-        },
-        "responses": {
-          "200": {
-            "description": "Successful response"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      }
-    },
-    "/api/multi-gpu": {
-      "post": {
-        "operationId": "post_distributed_training",
-        "summary": "Multi-GPU training",
-        "tags": [],
-        "description": "Distributed training across multiple GPUs",
-        "x-neutrino-resources": {
-          "num_cpus": 8.0,
-          "num_gpus": 4.0,
-          "memory_gb": 64.0
-        },
-        "responses": {
-          "200": {
-            "description": "Successful response"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        }
-      }
-    },
-    "/api/fractional-gpu": {
-      "post": {
-        "operationId": "post_small_model_inference",
-        "summary": "Fractional GPU usage",
-        "tags": [],
-        "description": "Share a GPU with other tasks",
+        "description": "\n    CPU-intensive task that benefits from Neutrino's worker pool.\n\n    This would be slow in a standard async FastAPI setup because it\n    blocks the event loop. With Neutrino, it runs in a separate worker\n    process with proper resource management.\n    ",
         "x-neutrino-resources": {
           "num_cpus": 1.0,
-          "num_gpus": 0.25,
-          "memory_gb": 4.0
+          "num_gpus": 0.0,
+          "memory_gb": 1.0
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "text": {
+                    "title": "Text",
+                    "type": "string"
+                  },
+                  "iterations": {
+                    "title": "Iterations",
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "text",
+                  "iterations"
+                ],
+                "title": "TaskRequest",
+                "type": "object"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "result": {
+                      "title": "Result",
+                      "type": "string"
+                    },
+                    "processed_chars": {
+                      "title": "Processed Chars",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "result",
+                    "processed_chars"
+                  ],
+                  "title": "TaskResponse",
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/neutrino/analyze": {
+      "post": {
+        "operationId": "post_analyze_data",
+        "summary": "Analyze Data",
+        "tags": [],
+        "description": "\n    Statistical analysis task.\n\n    In a real application, this might involve ML inference, image processing,\n    or other compute-heavy operations that benefit from Neutrino's\n    orchestration and worker lifecycle management.\n    ",
+        "x-neutrino-resources": {
+          "num_cpus": 1.0,
+          "num_gpus": 0.0,
+          "memory_gb": 1.0
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "user_id": {
+                    "title": "User Id",
+                    "type": "integer"
+                  },
+                  "data": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "title": "Data",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "user_id",
+                  "data"
+                ],
+                "title": "AnalysisRequest",
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "user_id": {
+                      "title": "User Id",
+                      "type": "integer"
+                    },
+                    "mean": {
+                      "title": "Mean",
+                      "type": "number"
+                    },
+                    "median": {
+                      "title": "Median",
+                      "type": "number"
+                    },
+                    "std_dev": {
+                      "title": "Std Dev",
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "user_id",
+                    "mean",
+                    "median",
+                    "std_dev"
+                  ],
+                  "title": "AnalysisResponse",
+                  "type": "object"
+                }
+              }
+            }
           },
           "500": {
             "description": "Internal server error"
@@ -112,6 +156,96 @@
     }
   },
   "components": {
-    "schemas": {}
+    "schemas": {
+      "TaskRequest": {
+        "properties": {
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "iterations": {
+            "title": "Iterations",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "text",
+          "iterations"
+        ],
+        "title": "TaskRequest",
+        "type": "object"
+      },
+      "TaskResponse": {
+        "properties": {
+          "result": {
+            "title": "Result",
+            "type": "string"
+          },
+          "processed_chars": {
+            "title": "Processed Chars",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "result",
+          "processed_chars"
+        ],
+        "title": "TaskResponse",
+        "type": "object"
+      },
+      "AnalysisRequest": {
+        "properties": {
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "user_id",
+          "data"
+        ],
+        "title": "AnalysisRequest",
+        "type": "object"
+      },
+      "AnalysisResponse": {
+        "properties": {
+          "user_id": {
+            "title": "User Id",
+            "type": "integer"
+          },
+          "mean": {
+            "title": "Mean",
+            "type": "number"
+          },
+          "median": {
+            "title": "Median",
+            "type": "number"
+          },
+          "std_dev": {
+            "title": "Std Dev",
+            "type": "number"
+          }
+        },
+        "required": [
+          "user_id",
+          "mean",
+          "median",
+          "std_dev"
+        ],
+        "title": "AnalysisResponse",
+        "type": "object"
+      }
+    }
+  },
+  "x-neutrino-asgi": {
+    "enabled": true,
+    "app_class": "fastapi.applications.FastAPI"
   }
 }
