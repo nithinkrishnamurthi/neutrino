@@ -12,14 +12,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Starting Neutrino orchestrator");
 
+    // Get config path from command-line arguments or use default
+    let config_path = std::env::args().nth(1).unwrap_or_else(|| "config.yaml".to_string());
+
     // Load configuration
-    let config = match Config::from_file("config.yaml") {
+    let config = match Config::from_file(&config_path) {
         Ok(cfg) => {
-            info!("Loaded configuration from config.yaml");
+            info!("Loaded configuration from {}", config_path);
             cfg
         }
         Err(e) => {
-            info!("Could not load config.yaml: {}, using defaults", e);
+            info!("Could not load {}: {}, using defaults", config_path, e);
             Config::default()
         }
     };

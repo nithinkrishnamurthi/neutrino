@@ -18,6 +18,8 @@ use crate::openapi::OpenApiSpec;
 use crate::orchestrator::Orchestrator;
 use crate::protocol::Message;
 
+use crate::protocol::ResourceRequirements;
+
 /// Shared application state
 #[derive(Clone)]
 pub struct AppState {
@@ -26,6 +28,13 @@ pub struct AppState {
     pub asgi_client: Option<reqwest::Client>,
     /// Set of registered Neutrino route paths for lookup-based routing
     pub neutrino_routes: Arc<HashSet<String>>,
+}
+
+/// Route metadata passed through request extensions
+#[derive(Clone, Debug)]
+pub struct RouteMetadata {
+    pub handler_name: String,
+    pub resources: ResourceRequirements,
 }
 
 /// Request body for task execution
@@ -142,30 +151,108 @@ async fn get_status(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+/// Get resource capacity information for all workers
+async fn get_capacity(State(state): State<AppState>) -> impl IntoResponse {
+    let workers = state.orchestrator.workers();
+    let workers_guard = workers.read().await;
+
+    let mut worker_capacities = Vec::new();
+    let mut total_cpus = 0.0;
+    let mut total_gpus = 0.0;
+    let mut total_memory_gb = 0.0;
+    let mut available_cpus = 0.0;
+    let mut available_gpus = 0.0;
+    let mut available_memory_gb = 0.0;
+
+    for worker_handle in workers_guard.iter() {
+        let worker = &worker_handle.worker;
+        let (avail_cpu, avail_gpu, avail_mem) = worker.available_resources();
+
+        worker_capacities.push(serde_json::json!({
+            "worker_id": worker.id,
+            "state": format!("{:?}", worker.state),
+            "capabilities": {
+                "cpus": worker.capabilities.num_cpus,
+                "gpus": worker.capabilities.num_gpus,
+                "memory_gb": worker.capabilities.memory_gb,
+            },
+            "allocated": {
+                "cpus": worker.allocation.allocated_cpus,
+                "gpus": worker.allocation.allocated_gpus,
+                "memory_gb": worker.allocation.allocated_memory_gb,
+            },
+            "available": {
+                "cpus": avail_cpu,
+                "gpus": avail_gpu,
+                "memory_gb": avail_mem,
+            },
+        }));
+
+        total_cpus += worker.capabilities.num_cpus;
+        total_gpus += worker.capabilities.num_gpus;
+        total_memory_gb += worker.capabilities.memory_gb;
+        available_cpus += avail_cpu;
+        available_gpus += avail_gpu;
+        available_memory_gb += avail_mem;
+    }
+
+    Json(serde_json::json!({
+        "total": {
+            "cpus": total_cpus,
+            "gpus": total_gpus,
+            "memory_gb": total_memory_gb,
+        },
+        "available": {
+            "cpus": available_cpus,
+            "gpus": available_gpus,
+            "memory_gb": available_memory_gb,
+        },
+        "allocated": {
+            "cpus": total_cpus - available_cpus,
+            "gpus": total_gpus - available_gpus,
+            "memory_gb": total_memory_gb - available_memory_gb,
+        },
+        "workers": worker_capacities,
+    }))
+}
+
 /// Execute a task with no request body (for GET/DELETE requests)
 async fn execute_task_no_body(
     State(state): State<AppState>,
-    Extension(handler_name): Extension<String>,
+    Extension(metadata): Extension<RouteMetadata>,
 ) -> Result<Json<TaskResponse>, AppError> {
-    info!("Received request for handler: {}", handler_name);
+    info!("Received request for handler: {}", metadata.handler_name);
 
     let start = std::time::Instant::now();
 
-    // Get next available worker using round-robin
+    // Find worker with sufficient resources
     let worker_idx = state
         .orchestrator
-        .get_next_worker()
+        .find_worker_with_resources(&metadata.resources)
         .await
-        .ok_or_else(|| AppError::NoWorkersAvailable)?;
+        .ok_or_else(|| AppError::InsufficientResources(format!(
+            "No workers available with required resources: cpus={}, gpus={}, memory={}GB",
+            metadata.resources.num_cpus,
+            metadata.resources.num_gpus,
+            metadata.resources.memory_gb
+        )))?;
 
     let workers = state.orchestrator.workers();
     let mut workers_guard = workers.write().await;
     let worker = &mut workers_guard[worker_idx];
 
     info!(
-        "Routing handler {} to worker {} (index {})",
-        handler_name, worker.worker.id, worker_idx
+        "Routing handler {} to worker {} (index {}) with resources: cpus={}, gpus={}, mem={}GB",
+        metadata.handler_name,
+        worker.worker.id,
+        worker_idx,
+        metadata.resources.num_cpus,
+        metadata.resources.num_gpus,
+        metadata.resources.memory_gb
     );
+
+    // Allocate resources
+    worker.worker.allocation.allocate(&metadata.resources);
 
     // For GET/DELETE, send empty map as args
     let args = rmpv::Value::Map(vec![]);
@@ -174,16 +261,20 @@ async fn execute_task_no_body(
     let task_id = uuid::Uuid::new_v4().to_string();
     let msg = Message::TaskAssignment {
         task_id: task_id.clone(),
-        function_name: handler_name.clone(),
+        function_name: metadata.handler_name.clone(),
         args,
-        resources: crate::protocol::ResourceRequirements::default(),
+        resources: metadata.resources.clone(),
     };
 
     // Send task to worker
     worker
         .send(&msg)
         .await
-        .map_err(|e| AppError::WorkerCommunicationError(e.to_string()))?;
+        .map_err(|e| {
+            // Deallocate on error
+            worker.worker.allocation.deallocate(&metadata.resources);
+            AppError::WorkerCommunicationError(e.to_string())
+        })?;
 
     // Mark worker as busy
     worker.worker.state = crate::worker::WorkerState::Busy;
@@ -192,7 +283,15 @@ async fn execute_task_no_body(
     let result_msg = worker
         .recv()
         .await
-        .map_err(|e| AppError::WorkerCommunicationError(e.to_string()))?;
+        .map_err(|e| {
+            // Deallocate on error
+            worker.worker.allocation.deallocate(&metadata.resources);
+            worker.worker.state = crate::worker::WorkerState::Idle;
+            AppError::WorkerCommunicationError(e.to_string())
+        })?;
+
+    // Deallocate resources after task completion
+    worker.worker.allocation.deallocate(&metadata.resources);
 
     // Mark worker as idle again
     worker.worker.state = crate::worker::WorkerState::Idle;
@@ -237,47 +336,68 @@ async fn execute_task_no_body(
 /// Execute a task with JSON request body (for POST/PUT/PATCH requests)
 async fn execute_task_with_body(
     State(state): State<AppState>,
-    Extension(handler_name): Extension<String>,
+    Extension(metadata): Extension<RouteMetadata>,
     Json(request): Json<TaskRequest>,
 ) -> Result<Json<TaskResponse>, AppError> {
-    info!("Received request for handler: {}", handler_name);
+    info!("Received request for handler: {}", metadata.handler_name);
 
     let start = std::time::Instant::now();
 
-    // Get next available worker using round-robin
+    // Find worker with sufficient resources
     let worker_idx = state
         .orchestrator
-        .get_next_worker()
+        .find_worker_with_resources(&metadata.resources)
         .await
-        .ok_or_else(|| AppError::NoWorkersAvailable)?;
+        .ok_or_else(|| AppError::InsufficientResources(format!(
+            "No workers available with required resources: cpus={}, gpus={}, memory={}GB",
+            metadata.resources.num_cpus,
+            metadata.resources.num_gpus,
+            metadata.resources.memory_gb
+        )))?;
 
     let workers = state.orchestrator.workers();
     let mut workers_guard = workers.write().await;
     let worker = &mut workers_guard[worker_idx];
 
     info!(
-        "Routing handler {} to worker {} (index {})",
-        handler_name, worker.worker.id, worker_idx
+        "Routing handler {} to worker {} (index {}) with resources: cpus={}, gpus={}, mem={}GB",
+        metadata.handler_name,
+        worker.worker.id,
+        worker_idx,
+        metadata.resources.num_cpus,
+        metadata.resources.num_gpus,
+        metadata.resources.memory_gb
     );
+
+    // Allocate resources
+    worker.worker.allocation.allocate(&metadata.resources);
 
     // Convert JSON to msgpack Value
     let args = json_to_msgpack_value(&request.args)
-        .map_err(|e| AppError::SerializationError(e.to_string()))?;
+        .map_err(|e| {
+            // Deallocate on error
+            worker.worker.allocation.deallocate(&metadata.resources);
+            AppError::SerializationError(e.to_string())
+        })?;
 
     // Create task assignment message
     let task_id = uuid::Uuid::new_v4().to_string();
     let msg = Message::TaskAssignment {
         task_id: task_id.clone(),
-        function_name: handler_name.clone(),
+        function_name: metadata.handler_name.clone(),
         args,
-        resources: crate::protocol::ResourceRequirements::default(),
+        resources: metadata.resources.clone(),
     };
 
     // Send task to worker
     worker
         .send(&msg)
         .await
-        .map_err(|e| AppError::WorkerCommunicationError(e.to_string()))?;
+        .map_err(|e| {
+            // Deallocate on error
+            worker.worker.allocation.deallocate(&metadata.resources);
+            AppError::WorkerCommunicationError(e.to_string())
+        })?;
 
     // Mark worker as busy
     worker.worker.state = crate::worker::WorkerState::Busy;
@@ -286,7 +406,15 @@ async fn execute_task_with_body(
     let result_msg = worker
         .recv()
         .await
-        .map_err(|e| AppError::WorkerCommunicationError(e.to_string()))?;
+        .map_err(|e| {
+            // Deallocate on error
+            worker.worker.allocation.deallocate(&metadata.resources);
+            worker.worker.state = crate::worker::WorkerState::Idle;
+            AppError::WorkerCommunicationError(e.to_string())
+        })?;
+
+    // Deallocate resources after task completion
+    worker.worker.allocation.deallocate(&metadata.resources);
 
     // Mark worker as idle again
     worker.worker.state = crate::worker::WorkerState::Idle;
@@ -428,6 +556,7 @@ async fn asgi_fallback_handler(
 #[derive(Debug)]
 pub enum AppError {
     NoWorkersAvailable,
+    InsufficientResources(String),
     RouteNotFound(String),
     SerializationError(String),
     DeserializationError(String),
@@ -443,6 +572,9 @@ impl IntoResponse for AppError {
         let (status, message) = match self {
             AppError::NoWorkersAvailable => {
                 (StatusCode::SERVICE_UNAVAILABLE, "No workers available".to_string())
+            }
+            AppError::InsufficientResources(details) => {
+                (StatusCode::SERVICE_UNAVAILABLE, format!("Insufficient resources: {}", details))
             }
             AppError::RouteNotFound(route) => {
                 (StatusCode::NOT_FOUND, format!("Route not found: {}", route))
@@ -506,10 +638,12 @@ pub fn create_router_with_openapi(
     let mut neutrino_routes = HashSet::new();
     neutrino_routes.insert("/health".to_string());
     neutrino_routes.insert("/status".to_string());
+    neutrino_routes.insert("/capacity".to_string());
 
     let mut router = Router::new()
         .route("/health", get(health_check))
-        .route("/status", get(get_status));
+        .route("/status", get(get_status))
+        .route("/capacity", get(get_capacity));
 
     // If OpenAPI spec is provided, create dynamic routes
     if let Some(spec) = openapi_spec {
@@ -518,19 +652,29 @@ pub fn create_router_with_openapi(
 
         for route_info in routes {
             info!(
-                "Registering route: {} {} -> {}",
-                route_info.method, route_info.path, route_info.handler_name
+                "Registering route: {} {} -> {} (cpus={}, gpus={}, mem={}GB)",
+                route_info.method,
+                route_info.path,
+                route_info.handler_name,
+                route_info.resources.num_cpus,
+                route_info.resources.num_gpus,
+                route_info.resources.memory_gb
             );
 
             // Add to Neutrino routes set
             neutrino_routes.insert(route_info.path.clone());
 
-            // Create a middleware that injects the handler name as an extension
-            let handler_name = route_info.handler_name.clone();
+            // Create metadata with handler name and resource requirements
+            let metadata = RouteMetadata {
+                handler_name: route_info.handler_name.clone(),
+                resources: route_info.resources.clone(),
+            };
+
+            // Create a middleware that injects the metadata as an extension
             let handler_middleware = middleware::from_fn(move |mut req: Request, next: Next| {
-                let handler_name = handler_name.clone();
+                let metadata = metadata.clone();
                 async move {
-                    req.extensions_mut().insert(handler_name);
+                    req.extensions_mut().insert(metadata);
                     next.run(req).await
                 }
             });

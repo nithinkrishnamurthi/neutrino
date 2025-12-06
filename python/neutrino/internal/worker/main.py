@@ -25,28 +25,32 @@ from neutrino.internal.worker.protocol import ProtocolHandler
 
 
 def main() -> NoReturn:
-    if len(sys.argv) != 4 :
-        print(f"Usage: {sys.argv[0]} <socket_path> <worker_id> <app_path>", file=sys.stderr)
+    if len(sys.argv) != 7 :
+        print(f"Usage: {sys.argv[0]} <socket_path> <worker_id> <app_path> <num_cpus> <num_gpus> <memory_gb>", file=sys.stderr)
         sys.exit(1)
 
     socket_path = sys.argv[1]
     worker_id = sys.argv[2]
     app_path = sys.argv[3]
+    num_cpus = float(sys.argv[4])
+    num_gpus = float(sys.argv[5])
+    memory_gb = float(sys.argv[6])
     pid = os.getpid()
 
     print(f"[Worker {worker_id}] Starting (pid={pid})")
 
     # Import the app module at startup (pre-fork pattern - stays hot)
+    # This will execute the @route decorators and populate the global registry
     print(f"[Worker {worker_id}] Loading app module: {app_path}")
     try:
-        module_parts = app_path.rsplit(":", 1)
-        module_name = module_parts[0]
-        app_var_name = module_parts[1] if len(module_parts) > 1 else "app"
+        # Import the module (this triggers route registration)
+        module = importlib.import_module(app_path)
 
-        # Import the module
-        module = importlib.import_module(module_name)
-        app = getattr(module, app_var_name)
-        print(f"[Worker {worker_id}] App loaded successfully with {len(app._route_registry)} routes")
+        # Get the global route registry from neutrino module
+        import neutrino
+        route_registry = neutrino._global_route_registry
+
+        print(f"[Worker {worker_id}] App loaded successfully with {len(route_registry)} routes")
     except Exception as e:
         print(f"[Worker {worker_id}] Failed to load app: {e}", file=sys.stderr)
         import traceback
@@ -64,9 +68,9 @@ def main() -> NoReturn:
 
     protocol = ProtocolHandler(sock)
 
-    # Send ready message
-    protocol.send_ready(worker_id, pid)
-    print(f"[Worker {worker_id}] Sent ready message")
+    # Send ready message with capabilities
+    protocol.send_ready(worker_id, pid, num_cpus, num_gpus, memory_gb)
+    print(f"[Worker {worker_id}] Sent ready message with capabilities: cpus={num_cpus}, gpus={num_gpus}, mem={memory_gb}GB")
 
     # Main message loop
     try:
@@ -106,11 +110,11 @@ def main() -> NoReturn:
 
                 print(f"[Worker {worker_id}] Task {task_id}: {func_name}({args})")
 
-                # Execute the task using pre-loaded app
+                # Execute the task using pre-loaded routes
                 try:
-                    # Find the route handler by function name
+                    # Find the route handler by function name in global registry
                     route = None
-                    for path, route_obj in app._route_registry.items():
+                    for path, route_obj in route_registry.items():
                         if route_obj.handler.__name__ == func_name:
                             route = route_obj
                             break

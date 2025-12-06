@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use crate::protocol::ResourceCapabilities;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -8,7 +9,9 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestratorConfig {
-    pub worker_count: usize,
+    /// Total worker count (deprecated, use worker_pools instead)
+    #[serde(default)]
+    pub worker_count: Option<usize>,
     pub http: HttpConfig,
     pub worker: WorkerConfig,
     pub tasks: TaskConfig,
@@ -17,6 +20,9 @@ pub struct OrchestratorConfig {
     /// Optional ASGI app configuration
     #[serde(default)]
     pub asgi: Option<AsgiConfig>,
+    /// Worker pools with different resource configurations
+    #[serde(default)]
+    pub worker_pools: Vec<WorkerPoolConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +31,20 @@ pub struct HttpConfig {
     pub port: u16,
     #[serde(default)]
     pub openapi_spec: Option<String>,
+}
+
+/// Configuration for a specific pool of workers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkerPoolConfig {
+    /// Name of the worker pool (e.g., "gpu_workers", "cpu_workers")
+    pub name: String,
+    /// Number of workers in this pool
+    pub count: usize,
+    /// Resource capabilities of each worker in this pool
+    pub resources: ResourceCapabilities,
+    /// GPU device indices to use (e.g., [0, 1] for GPUs 0 and 1)
+    #[serde(default)]
+    pub gpu_devices: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +117,7 @@ impl Config {
     pub fn default() -> Self {
         Config {
             orchestrator: OrchestratorConfig {
-                worker_count: 4,
+                worker_count: Some(4),
                 http: HttpConfig {
                     host: "0.0.0.0".to_string(),
                     port: 8080,
@@ -113,7 +133,32 @@ impl Config {
                 },
                 app_module: "app".to_string(),
                 asgi: None,
+                worker_pools: vec![],
             },
+        }
+    }
+
+    /// Get the effective worker count (either from worker_pools or legacy worker_count)
+    pub fn effective_worker_count(&self) -> usize {
+        if !self.orchestrator.worker_pools.is_empty() {
+            self.orchestrator.worker_pools.iter().map(|p| p.count).sum()
+        } else {
+            self.orchestrator.worker_count.unwrap_or(4)
+        }
+    }
+
+    /// Get worker pools, creating a default pool if none specified
+    pub fn effective_worker_pools(&self) -> Vec<WorkerPoolConfig> {
+        if !self.orchestrator.worker_pools.is_empty() {
+            self.orchestrator.worker_pools.clone()
+        } else {
+            // Create default pool from legacy worker_count
+            vec![WorkerPoolConfig {
+                name: "default".to_string(),
+                count: self.orchestrator.worker_count.unwrap_or(4),
+                resources: ResourceCapabilities::default(),
+                gpu_devices: vec![],
+            }]
         }
     }
 }
