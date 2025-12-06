@@ -9,6 +9,11 @@ pub struct GatewayConfig {
     pub discovery_mode: String,  // "static" | "kubernetes"
     pub static_backends: Vec<String>,  // Comma-separated URLs for static mode
 
+    // Kubernetes discovery
+    pub k8s_namespace: String,
+    pub k8s_label_selector: String,
+    pub k8s_backend_port: u16,
+
     // Capacity monitoring
     pub capacity_update_interval_secs: u64,
     pub capacity_timeout_secs: u64,
@@ -41,6 +46,14 @@ impl GatewayConfig {
                 .unwrap_or_else(|_| "/data/neutrino.db".to_string()),
             discovery_mode,
             static_backends,
+            k8s_namespace: env::var("K8S_NAMESPACE")
+                .unwrap_or_else(|_| "default".to_string()),
+            k8s_label_selector: env::var("K8S_LABEL_SELECTOR")
+                .unwrap_or_else(|_| "app=neutrino-orchestrator".to_string()),
+            k8s_backend_port: env::var("K8S_BACKEND_PORT")
+                .unwrap_or_else(|_| "8080".to_string())
+                .parse()
+                .unwrap_or(8080),
             capacity_update_interval_secs: env::var("CAPACITY_UPDATE_INTERVAL")
                 .unwrap_or_else(|_| "2".to_string())
                 .parse()

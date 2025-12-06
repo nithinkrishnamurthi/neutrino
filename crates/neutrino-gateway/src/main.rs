@@ -29,6 +29,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  Discovery mode: {}", config.discovery_mode);
     if config.discovery_mode == "static" {
         info!("  Static backends: {:?}", config.static_backends);
+    } else if config.discovery_mode == "kubernetes" {
+        info!("  Kubernetes namespace: {}", config.k8s_namespace);
+        info!("  Kubernetes label selector: {}", config.k8s_label_selector);
+        info!("  Kubernetes backend port: {}", config.k8s_backend_port);
     }
     info!("  Database path: {}", config.database_path);
     info!("  Capacity update interval: {}s", config.capacity_update_interval_secs);
@@ -44,6 +48,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize backend pool
     let discovery_mode = match config.discovery_mode.as_str() {
         "static" => DiscoveryMode::Static(config.static_backends.clone()),
+        "kubernetes" => DiscoveryMode::Kubernetes {
+            namespace: config.k8s_namespace.clone(),
+            label_selector: config.k8s_label_selector.clone(),
+            port: config.k8s_backend_port,
+        },
         _ => {
             return Err(format!("Unsupported discovery mode: {}", config.discovery_mode).into());
         }

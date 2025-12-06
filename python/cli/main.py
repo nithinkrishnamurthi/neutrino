@@ -398,7 +398,8 @@ def up(app_module: str, image_name: str, namespace: str, skip_docker: bool) -> N
     run_command(f"kubectl apply -f k8s/dashboard-deployment.yaml --namespace={namespace}", "Apply dashboard-deployment.yaml")
     run_command(f"kubectl apply -f k8s/dashboard-service.yaml --namespace={namespace}", "Apply dashboard-service.yaml")
 
-    # Apply gateway manifests
+    # Apply gateway manifests (RBAC first, then deployment)
+    run_command(f"kubectl apply -f k8s/gateway-rbac.yaml --namespace={namespace}", "Apply gateway-rbac.yaml")
     run_command(f"kubectl apply -f k8s/gateway-deployment.yaml --namespace={namespace}", "Apply gateway-deployment.yaml")
     run_command(f"kubectl apply -f k8s/gateway-service.yaml --namespace={namespace}", "Apply gateway-service.yaml")
 
@@ -605,6 +606,23 @@ def down(namespace: str, delete_all: bool) -> None:
     run_command(
         f"kubectl delete deployment neutrino-gateway --namespace={namespace}",
         "Deleted Deployment (gateway)",
+        check=False
+    )
+
+    # Delete gateway RBAC resources
+    run_command(
+        f"kubectl delete rolebinding neutrino-gateway --namespace={namespace}",
+        "Deleted RoleBinding (gateway)",
+        check=False
+    )
+    run_command(
+        f"kubectl delete role neutrino-gateway --namespace={namespace}",
+        "Deleted Role (gateway)",
+        check=False
+    )
+    run_command(
+        f"kubectl delete serviceaccount neutrino-gateway --namespace={namespace}",
+        "Deleted ServiceAccount (gateway)",
         check=False
     )
 

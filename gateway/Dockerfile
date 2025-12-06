@@ -1,4 +1,4 @@
-FROM rust:1.83-slim as builder
+FROM rustlang/rust:nightly-slim as builder
 
 WORKDIR /app
 
@@ -15,8 +15,8 @@ COPY crates ./crates
 # Build the gateway binary
 RUN cargo build --release --bin neutrino-gateway
 
-# Runtime stage
-FROM debian:bookworm-slim
+# Runtime stage - use same base as builder to match GLIBC
+FROM debian:sid-slim
 
 # Install runtime dependencies
 RUN apt-get update && \

@@ -1,0 +1,105 @@
+{
+  "config": {
+    "host": "http://192.168.0.35:8080",
+    "requests_per_endpoint": 500,
+    "concurrency": 25,
+    "timestamp": "2025-12-06 12:52:54"
+  },
+  "results": [
+    {
+      "endpoint": "/api/users",
+      "method": "GET",
+      "total_requests": 500,
+      "successful": 500,
+      "failed": 0,
+      "duration_secs": 2.5101922578178346,
+      "requests_per_sec": 199.18793010486814,
+      "success_rate": 100.0,
+      "latency_ms": {
+        "min": 6.743974983692169,
+        "p50": 75.01936296466738,
+        "p95": 130.59362187050283,
+        "p99": 139.1185619868338,
+        "max": 141.34398102760315,
+        "mean": 77.01909792050719,
+        "stddev": 36.55644244127751
+      }
+    },
+    {
+      "endpoint": "/users/1",
+      "method": "GET",
+      "total_requests": 500,
+      "successful": 500,
+      "failed": 0,
+      "duration_secs": 2.365527196088806,
+      "requests_per_sec": 211.3693728935802,
+      "success_rate": 100.0,
+      "latency_ms": {
+        "min": 5.5490469094365835,
+        "p50": 72.34721991699189,
+        "p95": 116.12616595812142,
+        "p99": 121.50418502278626,
+        "max": 139.63164389133453,
+        "mean": 72.67557424260303,
+        "stddev": 33.00447890563166
+      }
+    },
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "total_requests": 500,
+      "successful": 500,
+      "failed": 0,
+      "duration_secs": 2.300729383016005,
+      "requests_per_sec": 217.32238640971957,
+      "success_rate": 100.0,
+      "latency_ms": {
+        "min": 2.2608551662415266,
+        "p50": 62.983393552713096,
+        "p95": 124.03493095189333,
+        "p99": 130.3533271420747,
+        "max": 131.01008511148393,
+        "mean": 70.56236500479281,
+        "stddev": 33.381942689288636
+      }
+    },
+    {
+      "endpoint": "/neutrino/process",
+      "method": "POST",
+      "total_requests": 500,
+      "successful": 0,
+      "failed": 500,
+      "duration_secs": 2.394925977103412,
+      "requests_per_sec": 0.0,
+      "success_rate": 0.0,
+      "latency_ms": {
+        "min": 4.294549115002155,
+        "p50": 90.30765411444008,
+        "p95": 118.01674403250217,
+        "p99": 121.74423108808696,
+        "max": 123.81602497771382,
+        "mean": 75.631275779102,
+        "stddev": 35.100574320190624
+      }
+    },
+    {
+      "endpoint": "/neutrino/analyze",
+      "method": "POST",
+      "total_requests": 500,
+      "successful": 0,
+      "failed": 500,
+      "duration_secs": 2.366044661961496,
+      "requests_per_sec": 0.0,
+      "success_rate": 0.0,
+      "latency_ms": {
+        "min": 4.077777964994311,
+        "p50": 71.83018093928695,
+        "p95": 116.97424901649356,
+        "p99": 122.24842607975006,
+        "max": 124.47452591732144,
+        "mean": 73.84090766543522,
+        "stddev": 32.62967003948235
+      }
+    }
+  ]
+}

@@ -5,7 +5,7 @@ metadata:
   labels:
     app: neutrino
 spec:
-  type: LoadBalancer
+  type: ClusterIP  # Internal only - gateway discovers pods directly via k8s API
   selector:
     app: neutrino
   ports:

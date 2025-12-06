@@ -1,3 +1,5 @@
+use k8s_openapi::api::core::v1::Pod;
+use kube::{api::ListParams, Api, Client};
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -9,11 +11,12 @@ use tracing::{debug, error, info, warn};
 pub enum DiscoveryMode {
     /// Static list of backend URLs (for testing/simple deployments)
     Static(Vec<String>),
-    // TODO: Add Kubernetes discovery in future
-    // Kubernetes {
-    //     namespace: String,
-    //     label_selector: String,
-    // },
+    /// Kubernetes service discovery
+    Kubernetes {
+        namespace: String,
+        label_selector: String,
+        port: u16,
+    },
 }
 
 /// Backend pod with resource tracking
@@ -81,15 +84,12 @@ impl Backend {
 /// Capacity response from /capacity endpoint
 #[derive(Debug, Deserialize)]
 struct CapacityResponse {
-    available_cpus: f64,
-    available_gpus: f64,
-    available_memory_gb: f64,
-    #[serde(default)]
-    total: Option<TotalCapacity>,
+    available: ResourceAmounts,
+    total: ResourceAmounts,
 }
 
 #[derive(Debug, Deserialize)]
-struct TotalCapacity {
+struct ResourceAmounts {
     cpus: f64,
     gpus: f64,
     memory_gb: f64,
@@ -136,12 +136,108 @@ impl BackendPool {
                 }
                 info!("Initialized {} static backends", backends.len());
             }
+            DiscoveryMode::Kubernetes { namespace, label_selector, port } => {
+                info!(
+                    "Using Kubernetes discovery: namespace={}, labels={}, port={}",
+                    namespace, label_selector, port
+                );
+
+                // Discover pods immediately
+                self.discover_kubernetes_backends(namespace, label_selector, *port)
+                    .await
+                    .map_err(|e| format!("Failed to discover Kubernetes backends: {}", e))?;
+
+                // Start background discovery refresh
+                self.start_kubernetes_discovery(namespace.clone(), label_selector.clone(), *port)
+                    .await;
+            }
         }
 
         // Start background monitoring task
         self.start_monitoring().await;
 
         Ok(())
+    }
+
+    /// Discover backends from Kubernetes API
+    async fn discover_kubernetes_backends(
+        &self,
+        namespace: &str,
+        label_selector: &str,
+        port: u16,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let client = Client::try_default().await?;
+        let pods: Api<Pod> = Api::namespaced(client, namespace);
+
+        let lp = ListParams::default().labels(label_selector);
+        let pod_list = pods.list(&lp).await?;
+
+        let mut backends = self.backends.write().await;
+        let mut new_urls = Vec::new();
+
+        for pod in pod_list.items {
+            if let Some(status) = &pod.status {
+                if let Some(pod_ip) = &status.pod_ip {
+                    // Only add Running pods
+                    if let Some(phase) = &status.phase {
+                        if phase == "Running" {
+                            let url = format!("http://{}:{}", pod_ip, port);
+                            new_urls.push(url.clone());
+
+                            // Add backend if it doesn't exist
+                            if !backends.iter().any(|b| b.url == url) {
+                                let pod_name = pod.metadata.name.as_deref().unwrap_or("unknown");
+                                info!("Discovered new backend: {} (pod: {})", url, pod_name);
+                                backends.push(Backend::new(url));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remove backends that no longer exist
+        backends.retain(|backend| {
+            let exists = new_urls.contains(&backend.url);
+            if !exists {
+                info!("Removing backend (pod no longer running): {}", backend.url);
+            }
+            exists
+        });
+
+        info!("Kubernetes discovery complete: {} backends", backends.len());
+
+        Ok(())
+    }
+
+    /// Start background task to periodically refresh Kubernetes pod list
+    async fn start_kubernetes_discovery(&self, namespace: String, label_selector: String, port: u16) {
+        let backends = Arc::clone(&self.backends);
+        let update_interval = Duration::from_secs(30); // Refresh every 30 seconds
+
+        // Clone self for use in async block
+        let pool_clone = Self {
+            backends,
+            http_client: self.http_client.clone(),
+            discovery_mode: self.discovery_mode.clone(),
+            update_interval: self.update_interval,
+            capacity_timeout: self.capacity_timeout,
+        };
+
+        tokio::spawn(async move {
+            info!("Starting Kubernetes pod discovery (interval: 30s)");
+
+            loop {
+                tokio::time::sleep(update_interval).await;
+
+                if let Err(e) = pool_clone
+                    .discover_kubernetes_backends(&namespace, &label_selector, port)
+                    .await
+                {
+                    error!("Failed to refresh Kubernetes backends: {}", e);
+                }
+            }
+        });
     }
 
     /// Start background task to poll backend capacities
@@ -164,16 +260,12 @@ impl BackendPool {
                 for backend in backends_guard.iter_mut() {
                     match Self::fetch_capacity(&http_client, &backend.url).await {
                         Ok(capacity) => {
-                            backend.available_cpus = capacity.available_cpus;
-                            backend.available_gpus = capacity.available_gpus;
-                            backend.available_memory_gb = capacity.available_memory_gb;
-
-                            // Update totals if provided
-                            if let Some(total) = capacity.total {
-                                backend.total_cpus = total.cpus;
-                                backend.total_gpus = total.gpus;
-                                backend.total_memory_gb = total.memory_gb;
-                            }
+                            backend.available_cpus = capacity.available.cpus;
+                            backend.available_gpus = capacity.available.gpus;
+                            backend.available_memory_gb = capacity.available.memory_gb;
+                            backend.total_cpus = capacity.total.cpus;
+                            backend.total_gpus = capacity.total.gpus;
+                            backend.total_memory_gb = capacity.total.memory_gb;
 
                             backend.last_updated = Instant::now();
                             backend.healthy = true;

@@ -5,7 +5,7 @@ metadata:
   labels:
     app: neutrino-gateway
 spec:
-  type: LoadBalancer
+  type: LoadBalancer  # Gateway is the single entry point
   selector:
     app: neutrino-gateway
   ports:
