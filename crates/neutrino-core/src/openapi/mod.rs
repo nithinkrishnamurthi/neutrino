@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use crate::protocol::ResourceRequirements;
+
 /// OpenAPI 3.0 specification
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenApiSpec {
@@ -55,6 +57,9 @@ pub struct Operation {
     pub request_body: Option<RequestBody>,
     #[serde(default)]
     pub responses: HashMap<String, Response>,
+    /// Neutrino-specific resource requirements (OpenAPI extension field)
+    #[serde(rename = "x-neutrino-resources", skip_serializing_if = "Option::is_none")]
+    pub neutrino_resources: Option<ResourceRequirements>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -93,6 +98,7 @@ pub struct RouteInfo {
     pub method: String,
     pub operation_id: String,
     pub handler_name: String,
+    pub resources: ResourceRequirements,
 }
 
 impl OpenApiSpec {
@@ -117,6 +123,7 @@ impl OpenApiSpec {
                     method: "GET".to_string(),
                     operation_id: op.operation_id.clone(),
                     handler_name: extract_handler_name(&op.operation_id),
+                    resources: op.neutrino_resources.clone().unwrap_or_default(),
                 });
             }
 
@@ -126,6 +133,7 @@ impl OpenApiSpec {
                     method: "POST".to_string(),
                     operation_id: op.operation_id.clone(),
                     handler_name: extract_handler_name(&op.operation_id),
+                    resources: op.neutrino_resources.clone().unwrap_or_default(),
                 });
             }
 
@@ -135,6 +143,7 @@ impl OpenApiSpec {
                     method: "PUT".to_string(),
                     operation_id: op.operation_id.clone(),
                     handler_name: extract_handler_name(&op.operation_id),
+                    resources: op.neutrino_resources.clone().unwrap_or_default(),
                 });
             }
 
@@ -144,6 +153,7 @@ impl OpenApiSpec {
                     method: "PATCH".to_string(),
                     operation_id: op.operation_id.clone(),
                     handler_name: extract_handler_name(&op.operation_id),
+                    resources: op.neutrino_resources.clone().unwrap_or_default(),
                 });
             }
 
@@ -153,6 +163,7 @@ impl OpenApiSpec {
                     method: "DELETE".to_string(),
                     operation_id: op.operation_id.clone(),
                     handler_name: extract_handler_name(&op.operation_id),
+                    resources: op.neutrino_resources.clone().unwrap_or_default(),
                 });
             }
         }

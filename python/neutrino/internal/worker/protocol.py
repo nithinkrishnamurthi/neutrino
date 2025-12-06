@@ -42,10 +42,20 @@ class ProtocolHandler:
             data += chunk
         return data
 
-    def send_ready(self, worker_id: str, pid: int) -> None:
-        """Send WorkerReady message."""
+    def send_ready(self, worker_id: str, pid: int, num_cpus: float = 1.0, num_gpus: float = 0.0, memory_gb: float = 4.0) -> None:
+        """Send WorkerReady message with resource capabilities."""
         # Match Rust enum variant structure for msgpack
-        self.send({"WorkerReady": {"worker_id": worker_id, "pid": pid}})
+        self.send({
+            "WorkerReady": {
+                "worker_id": worker_id,
+                "pid": pid,
+                "capabilities": {
+                    "num_cpus": num_cpus,
+                    "num_gpus": num_gpus,
+                    "memory_gb": memory_gb
+                }
+            }
+        })
 
     def send_task_result(
         self, task_id: str, success: bool, result: Any

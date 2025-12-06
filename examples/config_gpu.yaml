@@ -1,0 +1,46 @@
+# Example Neutrino configuration with GPU worker pools
+
+orchestrator:
+  app_module: "examples.gpu_resources"
+
+  http:
+    host: "0.0.0.0"
+    port: 8080
+    openapi_spec: "openapi.json"
+
+  worker:
+    max_tasks_per_worker: 1000
+    max_memory_mb: 4096
+    startup_timeout_secs: 10
+
+  tasks:
+    default_timeout_secs: 30
+
+  # Define worker pools with different resource profiles
+  worker_pools:
+    # Pool 1: GPU workers for inference tasks
+    - name: "gpu_workers"
+      count: 4
+      resources:
+        num_cpus: 8.0
+        num_gpus: 1.0
+        memory_gb: 32.0
+      gpu_devices: [0, 1, 2, 3]  # Use GPUs 0-3
+
+    # Pool 2: Multi-GPU workers for training
+    - name: "multi_gpu_workers"
+      count: 2
+      resources:
+        num_cpus: 16.0
+        num_gpus: 4.0
+        memory_gb: 128.0
+      gpu_devices: [0, 1, 2, 3]  # Each worker gets all 4 GPUs
+
+    # Pool 3: CPU-only workers for preprocessing
+    - name: "cpu_workers"
+      count: 8
+      resources:
+        num_cpus: 4.0
+        num_gpus: 0.0
+        memory_gb: 16.0
+      gpu_devices: []  # No GPUs

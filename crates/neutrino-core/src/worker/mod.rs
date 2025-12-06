@@ -3,8 +3,9 @@ use std::process::{Child, Command};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{debug, error, info};
+use serde::{Deserialize, Serialize};
 
-use crate::protocol::Message;
+use crate::protocol::{Message, ResourceCapabilities};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WorkerState {
@@ -14,12 +15,80 @@ pub enum WorkerState {
     Recycling,
 }
 
+/// Current resource allocation state of a worker
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceAllocation {
+    /// CPUs currently allocated
+    pub allocated_cpus: f64,
+    /// GPUs currently allocated
+    pub allocated_gpus: f64,
+    /// Memory currently allocated in GB
+    pub allocated_memory_gb: f64,
+}
+
+impl Default for ResourceAllocation {
+    fn default() -> Self {
+        Self {
+            allocated_cpus: 0.0,
+            allocated_gpus: 0.0,
+            allocated_memory_gb: 0.0,
+        }
+    }
+}
+
+impl ResourceAllocation {
+    /// Allocate resources for a task
+    pub fn allocate(&mut self, requirements: &crate::protocol::ResourceRequirements) {
+        self.allocated_cpus += requirements.num_cpus;
+        self.allocated_gpus += requirements.num_gpus;
+        self.allocated_memory_gb += requirements.memory_gb;
+    }
+
+    /// Deallocate resources after task completion
+    pub fn deallocate(&mut self, requirements: &crate::protocol::ResourceRequirements) {
+        self.allocated_cpus -= requirements.num_cpus;
+        self.allocated_gpus -= requirements.num_gpus;
+        self.allocated_memory_gb -= requirements.memory_gb;
+
+        // Ensure no negative values due to floating point precision
+        self.allocated_cpus = self.allocated_cpus.max(0.0);
+        self.allocated_gpus = self.allocated_gpus.max(0.0);
+        self.allocated_memory_gb = self.allocated_memory_gb.max(0.0);
+    }
+}
+
 #[derive(Debug)]
 pub struct Worker {
     pub id: String,
     pub pid: u32,
     pub state: WorkerState,
     pub socket_path: PathBuf,
+    /// Total resource capabilities of this worker
+    pub capabilities: ResourceCapabilities,
+    /// Current resource allocation
+    pub allocation: ResourceAllocation,
+}
+
+impl Worker {
+    /// Check if this worker has sufficient available resources for a task
+    pub fn has_capacity(&self, requirements: &crate::protocol::ResourceRequirements) -> bool {
+        let available_cpus = self.capabilities.num_cpus - self.allocation.allocated_cpus;
+        let available_gpus = self.capabilities.num_gpus - self.allocation.allocated_gpus;
+        let available_memory_gb = self.capabilities.memory_gb - self.allocation.allocated_memory_gb;
+
+        available_cpus >= requirements.num_cpus
+            && available_gpus >= requirements.num_gpus
+            && available_memory_gb >= requirements.memory_gb
+    }
+
+    /// Get available resources as a tuple (cpus, gpus, memory_gb)
+    pub fn available_resources(&self) -> (f64, f64, f64) {
+        (
+            self.capabilities.num_cpus - self.allocation.allocated_cpus,
+            self.capabilities.num_gpus - self.allocation.allocated_gpus,
+            self.capabilities.memory_gb - self.allocation.allocated_memory_gb,
+        )
+    }
 }
 
 pub struct WorkerHandle {
@@ -30,7 +99,12 @@ pub struct WorkerHandle {
 
 impl WorkerHandle {
     /// Spawn a new Python worker process and establish Unix socket connection
-    pub async fn spawn(worker_id: String, app_module: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn spawn(
+        worker_id: String,
+        app_module: &str,
+        capabilities: ResourceCapabilities,
+        gpu_devices: &[usize],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let socket_path = PathBuf::from(format!("/tmp/neutrino-{}.sock", worker_id));
 
         // Clean up old socket if it exists
@@ -51,7 +125,10 @@ impl WorkerHandle {
             .join("worker")
             .join("main.py");
 
-        info!("Spawning Python worker from {:?}", python_worker_path);
+        info!(
+            "Spawning Python worker from {:?} with resources: cpus={}, gpus={}, mem={}GB",
+            python_worker_path, capabilities.num_cpus, capabilities.num_gpus, capabilities.memory_gb
+        );
 
         // Get the current working directory to add to PYTHONPATH
         let cwd = std::env::current_dir()?;
@@ -65,14 +142,34 @@ impl WorkerHandle {
             format!("{}:{}:{}", python_path, cwd.display(), python_dir.display())
         };
 
-        let process = Command::new("python3")
-            .arg(&python_worker_path)
+        // Build command with environment variables
+        let mut cmd = Command::new("python3");
+        cmd.arg(&python_worker_path)
             .arg(&socket_path)
             .arg(&worker_id)
             .arg(app_module)
+            .arg(capabilities.num_cpus.to_string())
+            .arg(capabilities.num_gpus.to_string())
+            .arg(capabilities.memory_gb.to_string())
             .env("PYTHONPATH", new_python_path)
-            .current_dir(&cwd)
-            .spawn()?;
+            .current_dir(&cwd);
+
+        // Set CUDA_VISIBLE_DEVICES for GPU isolation
+        if !gpu_devices.is_empty() {
+            let cuda_devices = gpu_devices
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            info!("Worker {} using CUDA_VISIBLE_DEVICES={}", worker_id, cuda_devices);
+            cmd.env("CUDA_VISIBLE_DEVICES", &cuda_devices);
+        } else if capabilities.num_gpus == 0.0 {
+            // Explicitly hide all GPUs for CPU-only workers
+            info!("Worker {} is CPU-only (CUDA_VISIBLE_DEVICES='')", worker_id);
+            cmd.env("CUDA_VISIBLE_DEVICES", "");
+        }
+
+        let process = cmd.spawn()?;
 
         let pid = process.id();
         info!("Worker {} spawned with PID {}", worker_id, pid);
@@ -92,6 +189,8 @@ impl WorkerHandle {
             pid,
             state: WorkerState::Starting,
             socket_path,
+            capabilities,
+            allocation: ResourceAllocation::default(),
         };
 
         Ok(Self {
@@ -131,9 +230,13 @@ impl WorkerHandle {
     /// Wait for the worker to send a Ready message
     pub async fn wait_ready(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         match self.recv().await? {
-            Message::WorkerReady { worker_id, pid } => {
-                info!("Worker {} ready (pid={})", worker_id, pid);
+            Message::WorkerReady { worker_id, pid, capabilities } => {
+                info!(
+                    "Worker {} ready (pid={}, cpus={}, gpus={}, mem={}GB)",
+                    worker_id, pid, capabilities.num_cpus, capabilities.num_gpus, capabilities.memory_gb
+                );
                 self.worker.state = WorkerState::Idle;
+                self.worker.capabilities = capabilities;
                 Ok(())
             }
             other => {
