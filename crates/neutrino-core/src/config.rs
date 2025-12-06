@@ -49,9 +49,26 @@ pub struct WorkerPoolConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerConfig {
+    /// Maximum number of tasks a worker can execute before being recycled
     pub max_tasks_per_worker: u32,
+    /// Maximum memory usage in MB before recycling
     pub max_memory_mb: u64,
+    /// Maximum worker lifetime in seconds before recycling
+    #[serde(default = "default_max_lifetime_secs")]
+    pub max_lifetime_secs: u64,
+    /// Interval in seconds for checking worker memory usage
+    #[serde(default = "default_memory_check_interval_secs")]
+    pub memory_check_interval_secs: u64,
+    /// Worker startup timeout
     pub startup_timeout_secs: u64,
+}
+
+fn default_max_lifetime_secs() -> u64 {
+    3600 // 1 hour
+}
+
+fn default_memory_check_interval_secs() -> u64 {
+    30 // Check every 30 seconds
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +143,8 @@ impl Config {
                 worker: WorkerConfig {
                     max_tasks_per_worker: 1000,
                     max_memory_mb: 4096,
+                    max_lifetime_secs: 3600,
+                    memory_check_interval_secs: 30,
                     startup_timeout_secs: 10,
                 },
                 tasks: TaskConfig {

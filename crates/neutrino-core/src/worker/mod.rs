@@ -1,11 +1,14 @@
 use std::path::PathBuf;
 use std::process::{Child, Command};
+use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{debug, error, info};
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{Message, ResourceCapabilities};
+
+pub mod memory;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum WorkerState {
@@ -67,6 +70,12 @@ pub struct Worker {
     pub capabilities: ResourceCapabilities,
     /// Current resource allocation
     pub allocation: ResourceAllocation,
+    /// Number of tasks completed by this worker
+    pub tasks_completed: u32,
+    /// Time when this worker was spawned
+    pub spawn_time: Instant,
+    /// Current memory usage in MB (cached, updated periodically)
+    pub current_memory_mb: u64,
 }
 
 impl Worker {
@@ -88,6 +97,37 @@ impl Worker {
             self.capabilities.num_gpus - self.allocation.allocated_gpus,
             self.capabilities.memory_gb - self.allocation.allocated_memory_gb,
         )
+    }
+
+    /// Check if this worker should be recycled based on thresholds
+    pub fn should_recycle(&self, config: &crate::config::WorkerConfig) -> bool {
+        // Check task count threshold
+        if self.tasks_completed >= config.max_tasks_per_worker {
+            return true;
+        }
+
+        // Check memory threshold
+        if self.current_memory_mb >= config.max_memory_mb {
+            return true;
+        }
+
+        // Check lifetime threshold
+        let lifetime_secs = self.spawn_time.elapsed().as_secs();
+        if lifetime_secs >= config.max_lifetime_secs {
+            return true;
+        }
+
+        false
+    }
+
+    /// Increment the task counter
+    pub fn increment_task_count(&mut self) {
+        self.tasks_completed += 1;
+    }
+
+    /// Update memory usage
+    pub fn update_memory(&mut self, memory_mb: u64) {
+        self.current_memory_mb = memory_mb;
     }
 }
 
@@ -191,6 +231,9 @@ impl WorkerHandle {
             socket_path,
             capabilities,
             allocation: ResourceAllocation::default(),
+            tasks_completed: 0,
+            spawn_time: Instant::now(),
+            current_memory_mb: 0,
         };
 
         Ok(Self {

@@ -293,6 +293,9 @@ async fn execute_task_no_body(
     // Deallocate resources after task completion
     worker.worker.allocation.deallocate(&metadata.resources);
 
+    // Increment task counter
+    worker.worker.increment_task_count();
+
     // Mark worker as idle again
     worker.worker.state = crate::worker::WorkerState::Idle;
 
@@ -415,6 +418,9 @@ async fn execute_task_with_body(
 
     // Deallocate resources after task completion
     worker.worker.allocation.deallocate(&metadata.resources);
+
+    // Increment task counter
+    worker.worker.increment_task_count();
 
     // Mark worker as idle again
     worker.worker.state = crate::worker::WorkerState::Idle;
